@@ -303,6 +303,16 @@
   color: #6b7280;
 }
 
+.ws-search__message--loading {
+  animation: ws-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ws-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
 @media (max-width: 640px) {
   .ws-search__heading {
     font-size: 26px;

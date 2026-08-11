@@ -13,7 +13,7 @@
   const SEARCH_ENDPOINT = "/api/search";
   const LOOKUPS_ENDPOINT = "/api/lookups";
 
-  const DEBOUNCE_MS = 300;
+  const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
@@ -273,6 +273,7 @@
         return;
       }
 
+      this.showLoading();
       this.debounceTimer = setTimeout(() => this.runSearch(), DEBOUNCE_MS);
     }
 
@@ -422,6 +423,15 @@
         message
       )}</li>`;
       this.resultsEl.hidden = false;
+    }
+
+    showLoading() {
+      // Opens the panel the instant a valid query exists, instead of
+      // leaving a dead pause while the debounce/network round trip runs.
+      this.recentEl.hidden = true;
+      this.resultsEl.innerHTML = `<li class="ws-search__message ws-search__message--loading">Searching…</li>`;
+      this.resultsEl.hidden = false;
+      this.input.setAttribute("aria-expanded", "true");
     }
 
     closeResults() {

@@ -28,9 +28,9 @@ const SEARCH_FIELDS = [
 ];
 
 const MIME_TYPES = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
 };
 
 function fetchJson(url) {

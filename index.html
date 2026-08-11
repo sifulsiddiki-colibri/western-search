@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Western Schools — Course Search (prototype)</title>
+    <link rel="stylesheet" href="css/search-widget.css" />
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        max-width: 640px;
+        margin: 60px auto;
+        padding: 0 20px;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      p.hint {
+        color: #6b7280;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Course Discoverability — search prototype</h1>
+    <p class="hint">
+      Pick a state and license type, then search (e.g. "cardiac", "ethics",
+      "abuse"). Hits the live test API directly — no backend needed for this
+      prototype.
+    </p>
+    <div id="ws-course-search"></div>
+
+    <script src="js/search-widget.js"></script>
+    <script>
+      WSCourseSearch.init("#ws-course-search", {
+        defaultState: "FL",
+        defaultLicenseTypeId: 44,
+      });
+    </script>
+  </body>
+</html>

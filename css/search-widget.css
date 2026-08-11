@@ -1,0 +1,112 @@
+.ws-search {
+  position: relative;
+  max-width: 520px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.ws-search__context {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ws-search__context select {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.ws-search__field {
+  position: relative;
+}
+
+.ws-search__input {
+  width: 100%;
+  padding: 10px 40px 10px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font-size: 15px;
+  box-sizing: border-box;
+}
+
+.ws-search__input:focus {
+  outline: 2px solid #1f6feb;
+  outline-offset: -1px;
+}
+
+.ws-search__spinner {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  border: 2px solid #d0d5dd;
+  border-top-color: #1f6feb;
+  border-radius: 50%;
+  animation: ws-spin 0.7s linear infinite;
+}
+
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ws-search__results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.ws-search__result a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.ws-search__result:hover a,
+.ws-search__result.is-active a {
+  background: #f2f6fc;
+}
+
+.ws-search__result-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.ws-search__result-name mark {
+  background: #fff3b0;
+  color: inherit;
+  padding: 0;
+}
+
+.ws-search__result-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ws-search__message {
+  padding: 12px;
+  font-size: 13px;
+  color: #6b7280;
+}

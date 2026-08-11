@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+
+# Manager scoping doc — internal PII, not project code
+PT_Intern_Project_Scoping_Form_Dawn_FINAL 7-7-26.pdf

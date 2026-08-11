@@ -51,49 +51,86 @@ function fetchJson(url) {
   });
 }
 
+// License types rarely change — fetched once and reused so every search
+// can run across all professions without the browser needing to pick one.
+let licenseTypesCache = null;
+async function getAllLicenseTypeIds() {
+  if (!licenseTypesCache) {
+    const { data } = await fetchJson(`${API_BASE}/marketing/licenseTypes`);
+    licenseTypesCache = data;
+  }
+  return licenseTypesCache.map((lt) => lt.licenseTypeId);
+}
+
 async function handleLookups(res) {
   try {
     const [licenseTypes, states] = await Promise.all([
       fetchJson(`${API_BASE}/marketing/licenseTypes`).then((r) => r.data),
       fetchJson(`${API_BASE}/marketing/states`).then((r) => r.data),
     ]);
+    licenseTypesCache = licenseTypes;
     sendJson(res, 200, { licenseTypes, states });
   } catch (err) {
     sendJson(res, 502, { error: "Failed to load lookups" });
   }
 }
 
+// The API's licenseTypeIds param is not a true OR-filter — when repeated,
+// it silently only honors the first occurrence. Searching "every
+// profession" therefore means one request per license type, merged here.
+async function searchOneLicenseType(stateAbbv, licenseTypeId, filter, limit) {
+  const apiUrl = new URL(`${API_BASE}/marketing/products/withfilters`);
+  apiUrl.searchParams.set("stateAbbvs", stateAbbv);
+  apiUrl.searchParams.set("licenseTypeIds", licenseTypeId);
+  apiUrl.searchParams.set("filter", filter);
+  apiUrl.searchParams.set("offset", "0");
+  apiUrl.searchParams.set("limit", limit);
+
+  const { data, headers } = await fetchJson(apiUrl.toString());
+  let total = (data.products || []).length;
+  try {
+    total = JSON.parse(headers["x-pagination"]).total;
+  } catch (e) {
+    // header missing or malformed — fall back to page length
+  }
+  return { products: data.products || [], total };
+}
+
 async function handleSearch(res, query) {
   const stateAbbv = query.get("state");
-  const licenseTypeId = query.get("licenseTypeId");
   const q = (query.get("q") || "").trim();
-  const offset = query.get("offset") || "0";
   const limit = query.get("limit") || "8";
 
-  if (!stateAbbv || !licenseTypeId) {
-    return sendJson(res, 400, { error: "state and licenseTypeId are required" });
+  if (!stateAbbv) {
+    return sendJson(res, 400, { error: "state is required" });
   }
   if (q.length < 2) {
     return sendJson(res, 200, { products: [], total: 0 });
   }
 
   const filter = `[${SEARCH_FIELDS.map((f) => `${f}~~${q}`).join("||")}]`;
-  const apiUrl = new URL(`${API_BASE}/marketing/products/withfilters`);
-  apiUrl.searchParams.set("stateAbbvs", stateAbbv);
-  apiUrl.searchParams.set("licenseTypeIds", licenseTypeId);
-  apiUrl.searchParams.set("filter", filter);
-  apiUrl.searchParams.set("offset", offset);
-  apiUrl.searchParams.set("limit", limit);
 
   try {
-    const { data, headers } = await fetchJson(apiUrl.toString());
-    let total = (data.products || []).length;
-    try {
-      total = JSON.parse(headers["x-pagination"]).total;
-    } catch (e) {
-      // header missing or malformed — fall back to page length
+    const licenseTypeIds = await getAllLicenseTypeIds();
+    const perType = await Promise.all(
+      licenseTypeIds.map((id) =>
+        searchOneLicenseType(stateAbbv, id, filter, limit)
+      )
+    );
+
+    const seen = new Set();
+    const products = [];
+    for (const { products: page } of perType) {
+      for (const product of page) {
+        if (seen.has(product.productId)) continue;
+        seen.add(product.productId);
+        products.push(product);
+      }
     }
-    sendJson(res, 200, { products: data.products || [], total });
+    products.sort((a, b) => a.name.localeCompare(b.name));
+
+    const total = perType.reduce((sum, r) => sum + r.total, 0);
+    sendJson(res, 200, { products: products.slice(0, Number(limit)), total });
   } catch (err) {
     sendJson(res, 502, { error: "Search request failed" });
   }

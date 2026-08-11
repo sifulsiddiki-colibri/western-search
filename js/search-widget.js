@@ -99,16 +99,9 @@
     loadContext() {
       try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        return {
-          stateAbbv: saved.stateAbbv || this.options.defaultState || "",
-          licenseTypeId:
-            saved.licenseTypeId || this.options.defaultLicenseTypeId || "",
-        };
+        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
       } catch (e) {
-        return {
-          stateAbbv: this.options.defaultState || "",
-          licenseTypeId: this.options.defaultLicenseTypeId || "",
-        };
+        return { stateAbbv: this.options.defaultState || "" };
       }
     }
 
@@ -147,12 +140,6 @@
 
           <div class="ws-search__controls">
             <div class="ws-search__field-group">
-              <label>Profession</label>
-              <select class="ws-search__license" aria-label="Profession">
-                <option value="">All professions</option>
-              </select>
-            </div>
-            <div class="ws-search__field-group">
               <label>State</label>
               <select class="ws-search__state" aria-label="State">
                 <option value="">All states</option>
@@ -188,7 +175,6 @@
       `;
 
       this.stateSelect = this.root.querySelector(".ws-search__state");
-      this.licenseSelect = this.root.querySelector(".ws-search__license");
       this.input = this.root.querySelector(".ws-search__input");
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
@@ -199,11 +185,6 @@
 
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
-        this.saveContext();
-        if (this.input.value.trim()) this.runSearch();
-      });
-      this.licenseSelect.addEventListener("change", () => {
-        this.context.licenseTypeId = this.licenseSelect.value;
         this.saveContext();
         if (this.input.value.trim()) this.runSearch();
       });
@@ -268,19 +249,10 @@
             this.stateSelect.appendChild(opt);
           });
 
-        licenseTypes.forEach((lt) => {
-          const opt = document.createElement("option");
-          opt.value = lt.licenseTypeId;
-          opt.textContent = lt.licenseTypeName;
-          this.licenseSelect.appendChild(opt);
-        });
-
         this.eyebrowEl.textContent = `Search courses across ${licenseTypes.length} professions`;
 
         if (this.context.stateAbbv)
           this.stateSelect.value = this.context.stateAbbv;
-        if (this.context.licenseTypeId)
-          this.licenseSelect.value = this.context.licenseTypeId;
       } catch (err) {
         console.error("WSCourseSearch: failed to load lookups", err);
       }
@@ -345,8 +317,8 @@
         return;
       }
 
-      if (!this.context.stateAbbv || !this.context.licenseTypeId) {
-        this.showMessage("Select a profession and state to search.");
+      if (!this.context.stateAbbv) {
+        this.showMessage("Select a state to search.");
         return;
       }
 
@@ -360,7 +332,6 @@
 
       const params = new URLSearchParams({
         state: this.context.stateAbbv,
-        licenseTypeId: this.context.licenseTypeId,
         q: query,
         offset: "0",
         limit: String(this.expanded ? EXPANDED_LIMIT : TYPEAHEAD_LIMIT),

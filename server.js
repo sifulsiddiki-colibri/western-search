@@ -41,7 +41,7 @@ function fetchJson(url) {
         res.on("data", (chunk) => (body += chunk));
         res.on("end", () => {
           try {
-            resolve(JSON.parse(body));
+            resolve({ data: JSON.parse(body), headers: res.headers });
           } catch (e) {
             reject(e);
           }
@@ -54,8 +54,8 @@ function fetchJson(url) {
 async function handleLookups(res) {
   try {
     const [licenseTypes, states] = await Promise.all([
-      fetchJson(`${API_BASE}/marketing/licenseTypes`),
-      fetchJson(`${API_BASE}/marketing/states`),
+      fetchJson(`${API_BASE}/marketing/licenseTypes`).then((r) => r.data),
+      fetchJson(`${API_BASE}/marketing/states`).then((r) => r.data),
     ]);
     sendJson(res, 200, { licenseTypes, states });
   } catch (err) {
@@ -86,11 +86,14 @@ async function handleSearch(res, query) {
   apiUrl.searchParams.set("limit", limit);
 
   try {
-    const data = await fetchJson(apiUrl.toString());
-    sendJson(res, 200, {
-      products: data.products || [],
-      total: data.productItemIds ? data.productItemIds.length : (data.products || []).length,
-    });
+    const { data, headers } = await fetchJson(apiUrl.toString());
+    let total = (data.products || []).length;
+    try {
+      total = JSON.parse(headers["x-pagination"]).total;
+    } catch (e) {
+      // header missing or malformed — fall back to page length
+    }
+    sendJson(res, 200, { products: data.products || [], total });
   } catch (err) {
     sendJson(res, 502, { error: "Search request failed" });
   }

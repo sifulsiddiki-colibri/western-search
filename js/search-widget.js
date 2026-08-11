@@ -15,8 +15,11 @@
 
   const DEBOUNCE_MS = 300;
   const MIN_QUERY_LENGTH = 2;
-  const RESULT_LIMIT = 8;
+  const TYPEAHEAD_LIMIT = 7;
+  const EXPANDED_LIMIT = 50;
   const STORAGE_KEY = "wsSearchContext";
+  const RECENT_KEY = "wsSearchRecent";
+  const MAX_RECENT = 5;
 
   function escapeHtml(str) {
     const div = document.createElement("div");
@@ -41,18 +44,29 @@
     return `/courses/${product.seoName || product.itemId}`;
   }
 
-  function formatPrice(product) {
-    if (product.priceAll == null) return "";
-    return `$${Number(product.priceAll).toFixed(2)}`;
+  function formatMeta(product) {
+    const offering = (product.offerings || [])[0];
+    const parts = [product.deliveryMethod];
+    if (offering && offering.creditHours != null) {
+      parts.push(
+        `${offering.creditHours} CE hr${offering.creditHours === 1 ? "" : "s"}`
+      );
+    }
+    if (product.priceAll != null) {
+      parts.push(`$${Number(product.priceAll).toFixed(2)}`);
+    }
+    return parts.filter(Boolean).join(" · ");
   }
 
-  function formatCreditHours(product) {
+  function creditBadge(product) {
     const offering = (product.offerings || [])[0];
-    if (!offering || offering.creditHours == null) return "";
-    return `${offering.creditHours} ${offering.creditType || "credit"} hr${
-      offering.creditHours === 1 ? "" : "s"
-    }`;
+    if (!offering) return { label: "", mandatory: false };
+    if (offering.isMandatory) return { label: "Mandatory", mandatory: true };
+    return { label: offering.creditType || "Elective", mandatory: false };
   }
+
+  const SEARCH_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+  const CLOCK_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   class WSCourseSearch {
     constructor(root, options) {
@@ -62,13 +76,24 @@
       this.debounceTimer = null;
       this.activeIndex = -1;
       this.lastResults = [];
-      this.lastQuery = "";
+      this.lastTotal = 0;
+      this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
 
       this.context = this.loadContext();
+      this.recent = this.loadRecent();
 
       this.render();
-      this.loadLookups();
+      this.loadLookups().then(() => this.applyInitialQuery());
+    }
+
+    applyInitialQuery() {
+      const q = new URLSearchParams(window.location.search).get("q");
+      if (q) {
+        this.input.value = q;
+        this.clearBtn.hidden = false;
+        this.runSearch();
+      }
     }
 
     loadContext() {
@@ -91,30 +116,73 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.context));
     }
 
+    loadRecent() {
+      try {
+        return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+      } catch (e) {
+        return [];
+      }
+    }
+
+    saveRecent(query) {
+      this.recent = [query, ...this.recent.filter((q) => q !== query)].slice(
+        0,
+        MAX_RECENT
+      );
+      localStorage.setItem(RECENT_KEY, JSON.stringify(this.recent));
+      this.renderRecent();
+    }
+
+    clearRecent() {
+      this.recent = [];
+      localStorage.removeItem(RECENT_KEY);
+      this.renderRecent();
+    }
+
     render() {
       this.root.innerHTML = `
         <div class="ws-search">
-          <div class="ws-search__context">
-            <select class="ws-search__state" aria-label="State">
-              <option value="">State…</option>
-            </select>
-            <select class="ws-search__license" aria-label="License type">
-              <option value="">License type…</option>
-            </select>
+          <p class="ws-search__eyebrow"></p>
+          <h2 class="ws-search__heading">What do you need to complete?</h2>
+
+          <div class="ws-search__controls">
+            <div class="ws-search__field-group">
+              <label>Profession</label>
+              <select class="ws-search__license" aria-label="Profession">
+                <option value="">All professions</option>
+              </select>
+            </div>
+            <div class="ws-search__field-group">
+              <label>State</label>
+              <select class="ws-search__state" aria-label="State">
+                <option value="">All states</option>
+              </select>
+            </div>
+            <div class="ws-search__input-wrap">
+              <span class="ws-search__input-icon">${SEARCH_ICON}</span>
+              <input
+                type="text"
+                class="ws-search__input"
+                placeholder="Try &quot;cardiac&quot; or &quot;ethics&quot;"
+                aria-label="Search courses"
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-owns="ws-search-results"
+              />
+              <button type="button" class="ws-search__clear" hidden>Clear</button>
+            </div>
+            <button type="button" class="ws-search__submit">Search</button>
           </div>
-          <div class="ws-search__field">
-            <input
-              type="text"
-              class="ws-search__input"
-              placeholder="Search courses, e.g. &quot;cardiac&quot;"
-              aria-label="Search courses"
-              autocomplete="off"
-              role="combobox"
-              aria-expanded="false"
-              aria-owns="ws-search-results"
-            />
-            <div class="ws-search__spinner" hidden></div>
+
+          <div class="ws-search__recent" hidden>
+            <div class="ws-search__recent-header">
+              <span>Recent searches</span>
+              <button type="button" class="ws-search__recent-clear">Clear</button>
+            </div>
+            <div class="ws-search__recent-pills"></div>
           </div>
+
           <ul class="ws-search__results" id="ws-search-results" hidden></ul>
         </div>
       `;
@@ -122,24 +190,67 @@
       this.stateSelect = this.root.querySelector(".ws-search__state");
       this.licenseSelect = this.root.querySelector(".ws-search__license");
       this.input = this.root.querySelector(".ws-search__input");
-      this.spinner = this.root.querySelector(".ws-search__spinner");
+      this.clearBtn = this.root.querySelector(".ws-search__clear");
+      this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
+      this.eyebrowEl = this.root.querySelector(".ws-search__eyebrow");
+      this.recentEl = this.root.querySelector(".ws-search__recent");
+      this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
         this.saveContext();
-        this.runSearch();
+        if (this.input.value.trim()) this.runSearch();
       });
       this.licenseSelect.addEventListener("change", () => {
         this.context.licenseTypeId = this.licenseSelect.value;
         this.saveContext();
-        this.runSearch();
+        if (this.input.value.trim()) this.runSearch();
       });
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
+      this.input.addEventListener("focus", () => {
+        if (!this.input.value.trim()) this.renderRecent();
+      });
+      this.clearBtn.addEventListener("click", () => {
+        this.input.value = "";
+        this.onInput();
+        this.input.focus();
+      });
+      this.submitBtn.addEventListener("click", () => this.runSearch());
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this.closeResults();
       });
+
+      this.renderRecent();
+    }
+
+    renderRecent() {
+      if (!this.recent.length || this.input.value.trim()) {
+        this.recentEl.hidden = true;
+        return;
+      }
+      this.recentPillsEl.innerHTML = this.recent
+        .map(
+          (q) => `
+            <button type="button" class="ws-search__pill" data-query="${escapeHtml(
+              q
+            )}">${CLOCK_ICON}${escapeHtml(q)}</button>
+          `
+        )
+        .join("");
+      this.recentEl.hidden = false;
+
+      this.recentPillsEl.querySelectorAll(".ws-search__pill").forEach((pill) => {
+        pill.addEventListener("click", () => {
+          this.input.value = pill.dataset.query;
+          this.runSearch();
+        });
+      });
+
+      this.recentEl
+        .querySelector(".ws-search__recent-clear")
+        .onclick = () => this.clearRecent();
     }
 
     async loadLookups() {
@@ -164,6 +275,8 @@
           this.licenseSelect.appendChild(opt);
         });
 
+        this.eyebrowEl.textContent = `Search courses across ${licenseTypes.length} professions`;
+
         if (this.context.stateAbbv)
           this.stateSelect.value = this.context.stateAbbv;
         if (this.context.licenseTypeId)
@@ -176,7 +289,13 @@
     onInput() {
       clearTimeout(this.debounceTimer);
       const query = this.input.value.trim();
+      this.clearBtn.hidden = !query;
 
+      if (!query) {
+        this.closeResults();
+        this.renderRecent();
+        return;
+      }
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
         return;
@@ -203,6 +322,8 @@
           window.location.href = this.buildProductUrl(
             this.lastResults[this.activeIndex]
           );
+        } else {
+          this.runSearch();
         }
       } else if (e.key === "Escape") {
         this.closeResults();
@@ -217,7 +338,7 @@
       if (active) active.scrollIntoView({ block: "nearest" });
     }
 
-    async runSearch() {
+    async runSearch(expand) {
       const query = this.input.value.trim();
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
@@ -225,22 +346,24 @@
       }
 
       if (!this.context.stateAbbv || !this.context.licenseTypeId) {
-        this.showMessage("Select a state and license type to search.");
+        this.showMessage("Select a profession and state to search.");
         return;
       }
+
+      this.expanded = !!expand;
+      this.recentEl.hidden = true;
 
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
 
-      this.lastQuery = query;
-      this.spinner.hidden = false;
+      this.root.classList.add("is-loading");
 
       const params = new URLSearchParams({
         state: this.context.stateAbbv,
         licenseTypeId: this.context.licenseTypeId,
         q: query,
         offset: "0",
-        limit: String(RESULT_LIMIT),
+        limit: String(this.expanded ? EXPANDED_LIMIT : TYPEAHEAD_LIMIT),
       });
 
       try {
@@ -250,13 +373,15 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.lastResults = data.products || [];
+        this.lastTotal = data.total || this.lastResults.length;
+        this.saveRecent(query);
         this.renderResults(query);
       } catch (err) {
         if (err.name === "AbortError") return;
         console.error("WSCourseSearch: search failed", err);
         this.showMessage("Something went wrong. Please try again.");
       } finally {
-        this.spinner.hidden = true;
+        this.root.classList.remove("is-loading");
       }
     }
 
@@ -268,30 +393,53 @@
         return;
       }
 
-      this.resultsEl.innerHTML = this.lastResults
+      const rows = this.lastResults
         .map((product, i) => {
           const url = this.buildProductUrl(product);
-          const meta = [
-            product.deliveryMethod,
-            formatCreditHours(product),
-            formatPrice(product),
-          ]
-            .filter(Boolean)
-            .join(" · ");
+          const badge = creditBadge(product);
 
           return `
             <li class="ws-search__result" data-index="${i}">
               <a href="${escapeHtml(url)}">
-                <span class="ws-search__result-name">${highlightMatch(
-                  product.name,
-                  query
-                )}</span>
-                <span class="ws-search__result-meta">${escapeHtml(meta)}</span>
+                ${
+                  badge.label
+                    ? `<span class="ws-search__badge${
+                        badge.mandatory ? " is-mandatory" : ""
+                      }">${escapeHtml(badge.label)}</span>`
+                    : ""
+                }
+                <span class="ws-search__result-text">
+                  <span class="ws-search__result-name">${highlightMatch(
+                    product.name,
+                    query
+                  )}</span>
+                  <span class="ws-search__result-meta">${escapeHtml(
+                    formatMeta(product)
+                  )}</span>
+                </span>
               </a>
             </li>
           `;
         })
         .join("");
+
+      const footer =
+        !this.expanded && this.lastTotal > this.lastResults.length
+          ? `<li class="ws-search__footer">
+               <button type="button" class="ws-search__see-all">
+                 ${SEARCH_ICON} See all ${this.lastTotal} results for "${escapeHtml(
+                   query
+                 )}"
+               </button>
+             </li>`
+          : "";
+
+      this.resultsEl.innerHTML = rows + footer;
+
+      const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
+      if (seeAllBtn) {
+        seeAllBtn.addEventListener("click", () => this.runSearch(true));
+      }
 
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");

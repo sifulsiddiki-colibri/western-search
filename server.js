@@ -5,7 +5,7 @@
  * widget can't call it directly from the browser on any origin other than
  * its own. In production this proxy's job is played by a small WordPress
  * endpoint (PHP REST route or AJAX handler) — this stands in for that so
- * the search can be tested end-to-end today. Zero npm dependencies.
+ * the search can be tested end-to-end today.
  */
 const http = require("http");
 const https = require("https");
@@ -17,6 +17,36 @@ const PORT = process.env.PORT || 8080;
 const API_BASE = "https://test-api-ms.westernschools.com";
 const CATALOG_PAGE_SIZE = 100; // the API's hard per-request cap
 const CATALOG_TTL_MS = 15 * 60 * 1000;
+
+// Semantic matching: no embeddings API key is configured in this
+// environment (checked — no OPENAI/VOYAGE/COHERE/ANTHROPIC key), so this
+// runs a small sentence-embedding model locally instead of calling a paid
+// API. Genuinely real embeddings, no external service or billing needed.
+// Calibrated against the real catalog (see conversation) — "back pain
+// course" and "elderly patient care" score 0.5-0.8 against topically
+// related courses; unrelated pairs sit around 0.15-0.3.
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.4;
+const SEMANTIC_MAX_RESULTS = 5;
+let embedderPromise = null;
+function getEmbedder() {
+  if (!embedderPromise) {
+    const { pipeline } = require("@xenova/transformers");
+    embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+  }
+  return embedderPromise;
+}
+async function embed(text) {
+  const extractor = await getEmbedder();
+  const output = await extractor(text, { pooling: "mean", normalize: true });
+  return Array.from(output.data);
+}
+function cosineSim(a, b) {
+  // Both vectors are already L2-normalized, so the dot product IS the
+  // cosine similarity — no need to divide by magnitudes.
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
+}
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -141,16 +171,28 @@ function buildSearchableTokens(product) {
   };
 }
 
+function embeddingText(product) {
+  const offering = (product.offerings || [])[0] || {};
+  const tags = (offering.tags || []).map((t) => t.tagValue).join(", ");
+  return [product.name, tags].filter(Boolean).join(". ");
+}
+
 async function getCatalog(stateAbbv, licenseTypeId) {
   const key = `${stateAbbv}:${licenseTypeId}`;
   const cached = catalogCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CATALOG_TTL_MS) {
     return cached.products;
   }
-  const products = await fetchAllProducts(stateAbbv, licenseTypeId);
-  products.forEach((p) => {
+  // A handful of catalog entries in the test API are broken placeholders
+  // (name/description/seoName all null or empty) — not a real, clickable
+  // course, so exclude them before they can surface as a search result.
+  const products = (await fetchAllProducts(stateAbbv, licenseTypeId)).filter(
+    (p) => p.name
+  );
+  for (const p of products) {
     p.__tokens = buildSearchableTokens(p);
-  });
+    p.__embedding = await embed(embeddingText(p));
+  }
   catalogCache.set(key, { products, fetchedAt: Date.now() });
   return products;
 }
@@ -227,19 +269,56 @@ async function handleSearch(res, query) {
     );
 
     const seen = new Set();
-    const products = [];
+    const keywordMatches = [];
     for (const catalog of catalogs) {
       for (const product of catalog) {
         if (seen.has(product.productId)) continue;
         if (!productMatchesQuery(product.__tokens, queryTokens)) continue;
         seen.add(product.productId);
-        products.push(product);
+        keywordMatches.push(product);
       }
     }
-    products.sort((a, b) => a.name.localeCompare(b.name));
+    keywordMatches.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Semantic pass: catches queries with no literal keyword overlap (e.g.
+    // "back pain course" -> "Low Back Pain"). Only added for products the
+    // keyword pass above missed, ranked by similarity, and only above a
+    // threshold calibrated against this catalog — a query with no genuine
+    // semantic match (nothing scores above 0.4) correctly returns nothing
+    // extra rather than forcing in a weak match. Skipped for very short
+    // queries (e.g. "ca") — too little signal for embeddings, and keyword
+    // matching already covers that case.
+    let semanticMatches = [];
+    if (q.length >= 4) {
+      const queryEmbedding = await embed(q);
+      const semanticCandidates = [];
+      for (const catalog of catalogs) {
+        for (const product of catalog) {
+          if (seen.has(product.productId)) continue;
+          const score = cosineSim(queryEmbedding, product.__embedding);
+          if (score >= SEMANTIC_SIMILARITY_THRESHOLD) {
+            semanticCandidates.push({ product, score });
+          }
+        }
+      }
+      semanticCandidates.sort((a, b) => b.score - a.score);
+      semanticMatches = semanticCandidates
+        .slice(0, SEMANTIC_MAX_RESULTS)
+        .map(({ product, score }) => {
+          seen.add(product.productId);
+          return { ...product, matchType: "semantic", semanticScore: score };
+        });
+    }
+
+    const products = [
+      ...keywordMatches.map((p) => ({ ...p, matchType: "keyword" })),
+      ...semanticMatches,
+    ];
 
     sendJson(res, 200, {
-      products: products.slice(0, limit).map(({ __tokens, ...p }) => p),
+      products: products
+        .slice(0, limit)
+        .map(({ __tokens, __embedding, ...p }) => p),
       total: products.length,
     });
   } catch (err) {

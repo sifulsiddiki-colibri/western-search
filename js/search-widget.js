@@ -210,7 +210,7 @@
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
         this.saveContext();
-        if (this.input.value.trim()) this.runSearch();
+        this.runSearch();
       });
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));

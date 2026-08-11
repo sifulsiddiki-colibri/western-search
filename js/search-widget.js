@@ -38,10 +38,34 @@
     return `${before}<mark>${match}</mark>${after}`;
   }
 
-  // Placeholder — confirm the real course URL pattern with the web team
-  // before this ships. Falls back to a search-friendly slug in the meantime.
-  function defaultProductUrl(product) {
-    return `/courses/${product.seoName || product.itemId}`;
+  // Confirmed live pattern: westernschools.com/{profession}/courses/{slug}/?state={ST}
+  // e.g. westernschools.com/nursing/courses/behavioral-health-course-bundle-15-hours/?state=US
+  // Only the "nursing" profession segment is confirmed — the other two are
+  // a best-guess slugification pending a check against the live site.
+  const PROFESSION_SLUGS = {
+    Nursing: "nursing",
+    "Certified Nursing Assistant": "certified-nursing-assistant",
+    "Child Abuse Recognition": "child-abuse-recognition",
+  };
+
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function defaultProductUrl(product, stateAbbv) {
+    const offering = (product.offerings || [])[0];
+    const licenseType = offering && offering.licenseType;
+    const professionSlug = licenseType
+      ? PROFESSION_SLUGS[licenseType] || slugify(licenseType)
+      : "courses";
+    const courseSlug = slugify(product.seoName || String(product.itemId));
+    const state = stateAbbv || "US";
+    return `https://www.westernschools.com/${professionSlug}/courses/${courseSlug}/?state=${encodeURIComponent(
+      state
+    )}`;
   }
 
   function formatMeta(product) {
@@ -293,7 +317,8 @@
         if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
           e.preventDefault();
           window.location.href = this.buildProductUrl(
-            this.lastResults[this.activeIndex]
+            this.lastResults[this.activeIndex],
+            this.context.stateAbbv
           );
         } else {
           this.runSearch();
@@ -367,7 +392,7 @@
 
       const rows = this.lastResults
         .map((product, i) => {
-          const url = this.buildProductUrl(product);
+          const url = this.buildProductUrl(product, this.context.stateAbbv);
           const badge = creditBadge(product);
 
           return `

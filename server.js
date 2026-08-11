@@ -154,7 +154,10 @@ function serveStatic(res, urlPath) {
       res.end("Not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": MIME_TYPES[ext] || "text/plain" });
+    res.writeHead(200, {
+      "Content-Type": MIME_TYPES[ext] || "text/plain",
+      "Cache-Control": "no-store",
+    });
     res.end(content);
   });
 }

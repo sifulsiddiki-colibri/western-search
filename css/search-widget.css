@@ -341,7 +341,16 @@
     flex-direction: column;
     align-items: stretch;
   }
+  .ws-search__field-group {
+    min-width: 0;
+  }
+  .ws-search__input-wrap {
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
   .ws-search__submit {
+    align-self: stretch;
     width: 100%;
   }
 }

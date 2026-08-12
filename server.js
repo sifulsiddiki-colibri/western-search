@@ -18,34 +18,81 @@ const API_BASE = "https://test-api-ms.westernschools.com";
 const CATALOG_PAGE_SIZE = 100; // the API's hard per-request cap
 const CATALOG_TTL_MS = 15 * 60 * 1000;
 
-// Semantic matching: no embeddings API key is configured in this
-// environment (checked — no OPENAI/VOYAGE/COHERE/ANTHROPIC key), so this
-// runs a small sentence-embedding model locally instead of calling a paid
-// API. Genuinely real embeddings, no external service or billing needed.
-// Calibrated against the real catalog (see conversation) — "back pain
-// course" and "elderly patient care" score 0.5-0.8 against topically
-// related courses; unrelated pairs sit around 0.15-0.3.
-const SEMANTIC_SIMILARITY_THRESHOLD = 0.4;
-const SEMANTIC_MAX_RESULTS = 5;
-let embedderPromise = null;
-function getEmbedder() {
-  if (!embedderPromise) {
-    const { pipeline } = require("@xenova/transformers");
-    embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+// Semantic matching: runs on Colibri's internal "Mantle" Bedrock gateway
+// (an OpenAI-compatible facade in front of Bedrock-hosted OpenAI models —
+// direct native bedrock:InvokeModel is explicitly denied for the intern
+// role, and this gateway has no embeddings endpoint, only the Responses
+// API), so this asks the LLM to directly judge relevance against the
+// candidate list rather than comparing embedding vectors. A full-catalog
+// call takes ~5-6s, too slow to block the main results, so this is called
+// from a separate endpoint the widget fetches after the fast keyword pass
+// already rendered.
+const MANTLE_BASE_URL = "https://bedrock-mantle.us-east-2.api.aws/openai/v1";
+const MANTLE_MODEL = "openai.gpt-5.4";
+const MANTLE_PROJECT = "proj_tvmtkugy6lqg5wkhobwy";
+const MANTLE_TOKEN_TTL_MS = 30 * 60 * 1000; // conservative; token itself allows up to 12h
+const SEMANTIC_RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
+const SEMANTIC_MAX_RESULTS = 8;
+
+let mantleToken = null;
+let mantleTokenFetchedAt = 0;
+async function getMantleToken() {
+  if (mantleToken && Date.now() - mantleTokenFetchedAt < MANTLE_TOKEN_TTL_MS) {
+    return mantleToken;
   }
-  return embedderPromise;
+  const { getToken } = require("@aws/bedrock-token-generator");
+  mantleToken = await getToken({
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      sessionToken: process.env.AWS_SESSION_TOKEN,
+    },
+    region: process.env.AWS_REGION,
+  });
+  mantleTokenFetchedAt = Date.now();
+  return mantleToken;
 }
-async function embed(text) {
-  const extractor = await getEmbedder();
-  const output = await extractor(text, { pooling: "mean", normalize: true });
-  return Array.from(output.data);
-}
-function cosineSim(a, b) {
-  // Both vectors are already L2-normalized, so the dot product IS the
-  // cosine similarity — no need to divide by magnitudes.
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot;
+
+const semanticResultCache = new Map(); // key: `${state}:${q}` -> { relevantIds, fetchedAt }
+
+async function judgeRelevance(query, candidates) {
+  const token = await getMantleToken();
+  const res = await fetch(`${MANTLE_BASE_URL}/responses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "OpenAI-Project": MANTLE_PROJECT,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MANTLE_MODEL,
+      input: `Query: "${query}"\n\nCandidate courses (id: name):\n${candidates
+        .map((c) => `${c.id}: ${c.name}`)
+        .join("\n")}\n\nReturn at most ${SEMANTIC_MAX_RESULTS} course ids that are genuinely relevant to the query's meaning, even without exact keyword overlap, ordered from most to least relevant. If nothing is genuinely relevant, return an empty list rather than guessing.`,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "relevant_courses",
+          schema: {
+            type: "object",
+            properties: {
+              relevantIds: { type: "array", items: { type: "string" } },
+            },
+            required: ["relevantIds"],
+            additionalProperties: false,
+          },
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Mantle request failed: HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  const text = data.output?.[0]?.content?.[0]?.text;
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed.relevantIds) ? parsed.relevantIds : [];
 }
 
 const MIME_TYPES = {
@@ -171,12 +218,6 @@ function buildSearchableTokens(product) {
   };
 }
 
-function embeddingText(product) {
-  const offering = (product.offerings || [])[0] || {};
-  const tags = (offering.tags || []).map((t) => t.tagValue).join(", ");
-  return [product.name, tags].filter(Boolean).join(". ");
-}
-
 async function getCatalog(stateAbbv, licenseTypeId) {
   const key = `${stateAbbv}:${licenseTypeId}`;
   const cached = catalogCache.get(key);
@@ -191,7 +232,6 @@ async function getCatalog(stateAbbv, licenseTypeId) {
   );
   for (const p of products) {
     p.__tokens = buildSearchableTokens(p);
-    p.__embedding = await embed(embeddingText(p));
   }
   catalogCache.set(key, { products, fetchedAt: Date.now() });
   return products;
@@ -280,49 +320,72 @@ async function handleSearch(res, query) {
     }
     keywordMatches.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Semantic pass: catches queries with no literal keyword overlap (e.g.
-    // "back pain course" -> "Low Back Pain"). Only added for products the
-    // keyword pass above missed, ranked by similarity, and only above a
-    // threshold calibrated against this catalog — a query with no genuine
-    // semantic match (nothing scores above 0.4) correctly returns nothing
-    // extra rather than forcing in a weak match. Skipped for very short
-    // queries (e.g. "ca") — too little signal for embeddings, and keyword
-    // matching already covers that case.
-    let semanticMatches = [];
-    if (q.length >= 4) {
-      const queryEmbedding = await embed(q);
-      const semanticCandidates = [];
-      for (const catalog of catalogs) {
-        for (const product of catalog) {
-          if (seen.has(product.productId)) continue;
-          const score = cosineSim(queryEmbedding, product.__embedding);
-          if (score >= SEMANTIC_SIMILARITY_THRESHOLD) {
-            semanticCandidates.push({ product, score });
-          }
-        }
-      }
-      semanticCandidates.sort((a, b) => b.score - a.score);
-      semanticMatches = semanticCandidates
-        .slice(0, SEMANTIC_MAX_RESULTS)
-        .map(({ product, score }) => {
-          seen.add(product.productId);
-          return { ...product, matchType: "semantic", semanticScore: score };
-        });
-    }
-
-    const products = [
-      ...keywordMatches.map((p) => ({ ...p, matchType: "keyword" })),
-      ...semanticMatches,
-    ];
+    const products = keywordMatches.map((p) => ({ ...p, matchType: "keyword" }));
 
     sendJson(res, 200, {
-      products: products
-        .slice(0, limit)
-        .map(({ __tokens, __embedding, ...p }) => p),
+      products: products.slice(0, limit).map(({ __tokens, ...p }) => p),
       total: products.length,
     });
   } catch (err) {
     sendJson(res, 502, { error: "Search request failed" });
+  }
+}
+
+// Separate, slower endpoint: the LLM relevance-judging call takes ~5-6s
+// against the full catalog, so the widget calls this after the fast
+// keyword pass above has already rendered, and merges results in when
+// they arrive rather than blocking the initial response.
+async function handleSemanticSearch(res, query) {
+  const stateAbbv = query.get("state");
+  const q = (query.get("q") || "").trim();
+
+  if (!stateAbbv) {
+    return sendJson(res, 400, { error: "state is required" });
+  }
+  if (q.length < 4) {
+    return sendJson(res, 200, { products: [] });
+  }
+
+  const cacheKey = `${stateAbbv}:${q.toLowerCase()}`;
+  const cached = semanticResultCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < SEMANTIC_RESULT_CACHE_TTL_MS) {
+    return sendJson(res, 200, { products: cached.products });
+  }
+
+  try {
+    const licenseTypeIds = await getAllLicenseTypeIds();
+    const catalogs = await Promise.all(
+      licenseTypeIds.map((id) =>
+        getCatalog(stateAbbv, id).catch((err) => {
+          console.error(`Failed to load catalog for licenseTypeId ${id}:`, err.message);
+          return [];
+        })
+      )
+    );
+
+    const byId = new Map();
+    for (const catalog of catalogs) {
+      for (const product of catalog) byId.set(product.productId, product);
+    }
+    const candidates = Array.from(byId.values()).map((p) => ({
+      id: p.productId,
+      name: p.name,
+    }));
+
+    const relevantIds = await judgeRelevance(q, candidates);
+    const products = relevantIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((p) => ({ ...p, matchType: "semantic" }));
+
+    const clean = products.map(({ __tokens, ...p }) => p);
+    semanticResultCache.set(cacheKey, { products: clean, fetchedAt: Date.now() });
+    sendJson(res, 200, { products: clean });
+  } catch (err) {
+    console.error("Semantic search failed:", err.message);
+    // Progressive enhancement — the fast keyword results already
+    // rendered, so a failure here should be quiet, not break the page.
+    sendJson(res, 200, { products: [] });
   }
 }
 
@@ -360,6 +423,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (parsed.pathname === "/api/search") {
     return handleSearch(res, parsed.searchParams);
+  }
+  if (parsed.pathname === "/api/search/semantic") {
+    return handleSemanticSearch(res, parsed.searchParams);
   }
   serveStatic(res, parsed.pathname);
 });

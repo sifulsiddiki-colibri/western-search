@@ -3,18 +3,21 @@
  * Framework-free — designed to drop into the WordPress theme via a single
  * <div id="ws-course-search"></div> + this script tag.
  *
- * Scope: plain free-text search against the Marketing API's course catalog.
- * No AI/semantic matching — that's a separate, later phase.
+ * Fast keyword/typo-tolerant search renders immediately from /api/search;
+ * AI-judged semantic suggestions merge in separately from
+ * /api/search/semantic once that (slower, LLM-backed) call resolves.
  */
 (function () {
   // Same-origin proxy (server.js locally; a WordPress endpoint in
   // production) — the Marketing API sends no CORS headers, so the browser
   // can't call it directly from any other origin.
   const SEARCH_ENDPOINT = "/api/search";
+  const SEMANTIC_ENDPOINT = "/api/search/semantic";
   const LOOKUPS_ENDPOINT = "/api/lookups";
 
   const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
+  const MIN_SEMANTIC_QUERY_LENGTH = 4;
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STORAGE_KEY = "wsSearchContext";
@@ -98,6 +101,8 @@
       this.root = root;
       this.options = options || {};
       this.abortController = null;
+      this.semanticAbortController = null;
+      this.semanticStatus = "idle"; // idle | loading | done
       this.debounceTimer = null;
       this.activeIndex = -1;
       this.lastResults = [];
@@ -354,6 +359,8 @@
 
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
+      if (this.semanticAbortController) this.semanticAbortController.abort();
+      this.semanticStatus = "idle";
 
       this.root.classList.add("is-loading");
 
@@ -374,6 +381,7 @@
         this.lastTotal = data.total || this.lastResults.length;
         this.saveRecent(query);
         this.renderResults(query);
+        this.fetchSemanticResults(query);
       } catch (err) {
         if (err.name === "AbortError") return;
         console.error("WSCourseSearch: search failed", err);
@@ -383,10 +391,71 @@
       }
     }
 
+    // Runs separately from the main keyword search above — the LLM
+    // relevance call it hits can take several seconds against the full
+    // catalog, so keyword results render immediately and this merges in
+    // "Suggested" additions whenever it resolves, without blocking them.
+    async fetchSemanticResults(query) {
+      if (query.length < MIN_SEMANTIC_QUERY_LENGTH) return;
+
+      if (this.semanticAbortController) this.semanticAbortController.abort();
+      this.semanticAbortController = new AbortController();
+      const signal = this.semanticAbortController.signal;
+      const requestedState = this.context.stateAbbv;
+
+      this.semanticStatus = "loading";
+      this.renderResults(query);
+
+      try {
+        const params = new URLSearchParams({ state: requestedState, q: query });
+        const res = await fetch(`${SEMANTIC_ENDPOINT}?${params.toString()}`, {
+          signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // The query or state may have changed while this was in flight.
+        if (
+          this.input.value.trim() !== query ||
+          this.context.stateAbbv !== requestedState
+        ) {
+          return;
+        }
+
+        const existingIds = new Set(this.lastResults.map((p) => p.productId));
+        const additions = (data.products || []).filter(
+          (p) => !existingIds.has(p.productId)
+        );
+        this.lastResults = [...this.lastResults, ...additions];
+        this.semanticStatus = "done";
+        this.renderResults(query);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error("WSCourseSearch: semantic search failed", err);
+        this.semanticStatus = "done";
+        this.renderResults(query);
+      }
+    }
+
     renderResults(query) {
       this.activeIndex = -1;
 
+      const loadingRow =
+        this.semanticStatus === "loading"
+          ? `<li class="ws-search__message ws-search__message--loading">Finding AI suggestions…</li>`
+          : "";
+
       if (!this.lastResults.length) {
+        if (this.semanticStatus === "loading") {
+          // Keyword pass found nothing (e.g. "back pain course" has no
+          // literal keyword overlap), but the semantic pass is still
+          // running — don't dead-end into "no results" while it's in
+          // flight, since it may still find something.
+          this.resultsEl.innerHTML = loadingRow;
+          this.resultsEl.hidden = false;
+          this.input.setAttribute("aria-expanded", "true");
+          return;
+        }
         this.showMessage(`No courses found for "${escapeHtml(query)}".`);
         return;
       }
@@ -437,7 +506,7 @@
              </li>`
           : "";
 
-      this.resultsEl.innerHTML = rows + footer;
+      this.resultsEl.innerHTML = rows + footer + loadingRow;
 
       const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
       if (seeAllBtn) {

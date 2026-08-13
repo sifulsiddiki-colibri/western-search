@@ -1,56 +1,49 @@
 # WS Course Search — WordPress plugin
 
-Ports the working prototype (github.com/sifulsiddiki-colibri/western-search) into
-a real WordPress plugin, using `admin-ajax.php` instead of the local Node dev proxy.
+A thin WordPress-side proxy. All the real search logic — Meilisearch query,
+text embeddings, keyword+typo matching, semantic relevance filtering — lives
+in the Node backend (`server.js` in the repo root, github.com/sifulsiddiki-colibri/western-search).
+This plugin just wires that backend into WordPress via `admin-ajax.php`.
 
-**Not yet tested against a real WordPress install** — there's no WP instance in
-this environment. Test on a staging site before touching production.
+**Tested end-to-end** against a real WordPress instance (WordPress core +
+the official SQLite integration plugin, no MySQL needed) — not just
+reviewed. Verified: keyword search, typo tolerance, semantic rescue with
+zero keyword overlap, and the "Suggested" tag rendering correctly through
+the full WordPress → PHP → Node → Meilisearch path.
+
+## Why a proxy, not a PHP port
+
+An earlier version of this plugin reimplemented the matching logic
+natively in PHP. That worked for keyword/typo search (PHP's built-in
+`levenshtein()` made it straightforward), but hit a real wall once AI
+semantic matching was added: computing text embeddings has no clean PHP
+equivalent to the Node embedding pipeline — the same shape of problem
+AWS SigV4 signing was for the Mantle-based version before that. Proxying
+to the Node backend avoids duplicating business logic in two languages
+and two places to keep in sync.
 
 ## Install
 
-1. Copy the `ws-course-search/` folder into `wp-content/plugins/`.
-2. Activate it from the WordPress admin (Plugins → Installed Plugins).
-3. Add `[ws_course_search]` to the homepage and product listing page templates
-   (or directly in the block editor as a Shortcode block). Optional attribute:
-   `[ws_course_search default_state="FL"]`.
+1. Get the Node backend (`server.js` + a Meilisearch instance) running
+   somewhere reachable from your WordPress server.
+2. Set `WS_SEARCH_BACKEND_URL` to point at it — either edit the `define()`
+   near the top of `ws-course-search.php`, or define the constant in
+   `wp-config.php` before this plugin loads. Defaults to
+   `http://localhost:8080` (local development only).
+3. Copy the `ws-course-search/` folder into `wp-content/plugins/`.
+4. Activate it from the WordPress admin (Plugins → Installed Plugins).
+5. Add `[ws_course_search]` to the homepage and product listing page
+   templates (or directly in the block editor as a Shortcode block).
+   Optional attribute: `[ws_course_search default_state="FL"]`.
 
-## What works out of the box
+## Still open
 
-Keyword + typo-tolerant search — the same Levenshtein-based matching from
-`server.js`, ported to PHP (which has `levenshtein()` built in, so that part
-was actually less code than the JS version). Uses WordPress transients for
-the catalog cache instead of an in-memory Map, same 15-minute TTL.
-
-## What still needs wiring up: AI semantic suggestions
-
-The semantic pass calls Colibri's internal Mantle Bedrock gateway, which
-needs AWS SigV4 bearer-token signing — no clean PHP equivalent exists the
-way `@aws/bedrock-token-generator` does for Node. Rather than reimplement
-AWS request signing in PHP, `ws_search_handle_semantic()` proxies to
-whatever URL you set in `WS_SEARCH_SEMANTIC_ENDPOINT` (see the commented-out
-`define()` near the top of `ws-course-search.php`).
-
-That means you need a small always-on service somewhere that:
-- accepts `?state=XX&q=...`
-- runs the same logic as `handleSemanticSearch()` in `server.js`
-- returns `{ "products": [...] }`
-
-Realistic options, roughly in order of effort:
-1. Deploy `server.js`'s semantic piece as a small serverless function
-   (Lambda, Vercel, etc.) and point `WS_SEARCH_SEMANTIC_ENDPOINT` at it.
-2. Implement AWS SigV4 signing directly in PHP (more self-contained, more
-   work, and this plugin would then own the AWS credential management).
-
-Until one of those exists, semantic search degrades gracefully to "no
-suggestions" — the keyword/typo-tolerant search is unaffected either way.
-
-## Also still open
-
+- **Where does the Node backend actually run in production?** This is the
+  big open question — deferred deliberately while validating the
+  Meilisearch approach itself. Needs a real hosting decision (small VM,
+  container service, etc.) before this goes live anywhere real.
 - Only the `nursing` profession's course-URL slug is confirmed against a
-  real page. The other two are a best-guess slugification.
-- Real (long-lived, service-level) AWS credentials — whatever's currently
-  in the prototype's `.env` is a personal temporary SSO session token and
-  will expire.
-- This plugin talks to `test-api-ms.westernschools.com` (`WS_SEARCH_API_BASE`
-  near the top of the file) — swap to the production Marketing API host
-  before this goes live anywhere real.
+  real page (in `assets/search-widget.js`). The other two are a
+  best-guess slugification.
+- The backend currently points at `test-api-ms.westernschools.com` — swap
+  to the production Marketing API host before this goes live anywhere real.

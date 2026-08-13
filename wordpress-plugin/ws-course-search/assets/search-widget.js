@@ -3,9 +3,9 @@
  * Framework-free — designed to drop into the WordPress theme via a single
  * <div id="ws-course-search"></div> + this script tag.
  *
- * Fast keyword/typo-tolerant search renders immediately from /api/search;
- * AI-judged semantic suggestions merge in separately from
- * /api/search/semantic once that (slower, LLM-backed) call resolves.
+ * Keyword/typo-tolerant matching and AI semantic rescue both run on the
+ * backend (server.js, backed by a self-hosted Meilisearch index) and come
+ * back in a single fast call — no separate slow AI pass to wait for here.
  */
 (function () {
   // Same-origin backend — server.js's /api/* routes when running standalone
@@ -18,16 +18,12 @@
   const SEARCH_ENDPOINT = WP_CONFIG
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search`
     : "/api/search";
-  const SEMANTIC_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_semantic`
-    : "/api/search/semantic";
   const LOOKUPS_ENDPOINT = WP_CONFIG
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search_lookups`
     : "/api/lookups";
 
   const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
-  const MIN_SEMANTIC_QUERY_LENGTH = 4;
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STORAGE_KEY = "wsSearchContext";
@@ -116,8 +112,6 @@
       this.root = root;
       this.options = options || {};
       this.abortController = null;
-      this.semanticAbortController = null;
-      this.semanticStatus = "idle"; // idle | loading | done
       this.debounceTimer = null;
       this.activeIndex = -1;
       this.lastResults = [];
@@ -374,8 +368,6 @@
 
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
-      if (this.semanticAbortController) this.semanticAbortController.abort();
-      this.semanticStatus = "idle";
 
       this.root.classList.add("is-loading");
 
@@ -396,7 +388,6 @@
         this.lastTotal = data.total || this.lastResults.length;
         this.saveRecent(query);
         this.renderResults(query);
-        this.fetchSemanticResults(query);
       } catch (err) {
         if (err.name === "AbortError") return;
         console.error("WSCourseSearch: search failed", err);
@@ -406,71 +397,10 @@
       }
     }
 
-    // Runs separately from the main keyword search above — the LLM
-    // relevance call it hits can take several seconds against the full
-    // catalog, so keyword results render immediately and this merges in
-    // "Suggested" additions whenever it resolves, without blocking them.
-    async fetchSemanticResults(query) {
-      if (query.length < MIN_SEMANTIC_QUERY_LENGTH) return;
-
-      if (this.semanticAbortController) this.semanticAbortController.abort();
-      this.semanticAbortController = new AbortController();
-      const signal = this.semanticAbortController.signal;
-      const requestedState = this.context.stateAbbv;
-
-      this.semanticStatus = "loading";
-      this.renderResults(query);
-
-      try {
-        const params = new URLSearchParams({ state: requestedState, q: query });
-        const res = await fetch(withParams(SEMANTIC_ENDPOINT, params), {
-          signal,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        // The query or state may have changed while this was in flight.
-        if (
-          this.input.value.trim() !== query ||
-          this.context.stateAbbv !== requestedState
-        ) {
-          return;
-        }
-
-        const existingIds = new Set(this.lastResults.map((p) => p.productId));
-        const additions = (data.products || []).filter(
-          (p) => !existingIds.has(p.productId)
-        );
-        this.lastResults = [...this.lastResults, ...additions];
-        this.semanticStatus = "done";
-        this.renderResults(query);
-      } catch (err) {
-        if (err.name === "AbortError") return;
-        console.error("WSCourseSearch: semantic search failed", err);
-        this.semanticStatus = "done";
-        this.renderResults(query);
-      }
-    }
-
     renderResults(query) {
       this.activeIndex = -1;
 
-      const loadingRow =
-        this.semanticStatus === "loading"
-          ? `<li class="ws-search__message ws-search__message--loading">Finding AI suggestions…</li>`
-          : "";
-
       if (!this.lastResults.length) {
-        if (this.semanticStatus === "loading") {
-          // Keyword pass found nothing (e.g. "back pain course" has no
-          // literal keyword overlap), but the semantic pass is still
-          // running — don't dead-end into "no results" while it's in
-          // flight, since it may still find something.
-          this.resultsEl.innerHTML = loadingRow;
-          this.resultsEl.hidden = false;
-          this.input.setAttribute("aria-expanded", "true");
-          return;
-        }
         this.showMessage(`No courses found for "${escapeHtml(query)}".`);
         return;
       }
@@ -521,7 +451,7 @@
              </li>`
           : "";
 
-      this.resultsEl.innerHTML = rows + footer + loadingRow;
+      this.resultsEl.innerHTML = rows + footer;
 
       const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
       if (seeAllBtn) {

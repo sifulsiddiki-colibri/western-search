@@ -12,87 +12,69 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
+const { Meilisearch } = require("meilisearch");
 
 const PORT = process.env.PORT || 8080;
 const API_BASE = "https://test-api-ms.westernschools.com";
 const CATALOG_PAGE_SIZE = 100; // the API's hard per-request cap
-const CATALOG_TTL_MS = 15 * 60 * 1000;
+const INDEX_TTL_MS = 15 * 60 * 1000; // how long before re-indexing a state+profession
+const CANDIDATE_POOL_SIZE = 50; // over-fetched, then relevance-filtered + deduped
+const RELEVANCE_THRESHOLD = 0.4; // raw cosine cutoff — see handleSearch
 
-// Semantic matching: runs on Colibri's internal "Mantle" Bedrock gateway
-// (an OpenAI-compatible facade in front of Bedrock-hosted OpenAI models —
-// direct native bedrock:InvokeModel is explicitly denied for the intern
-// role, and this gateway has no embeddings endpoint, only the Responses
-// API), so this asks the LLM to directly judge relevance against the
-// candidate list rather than comparing embedding vectors. A full-catalog
-// call takes ~5-6s, too slow to block the main results, so this is called
-// from a separate endpoint the widget fetches after the fast keyword pass
-// already rendered.
-const MANTLE_BASE_URL = "https://bedrock-mantle.us-east-2.api.aws/openai/v1";
-const MANTLE_MODEL = "openai.gpt-5.4";
-const MANTLE_PROJECT = "proj_tvmtkugy6lqg5wkhobwy";
-const MANTLE_TOKEN_TTL_MS = 30 * 60 * 1000; // conservative; token itself allows up to 12h
-const SEMANTIC_RESULT_CACHE_TTL_MS = 10 * 60 * 1000;
-const SEMANTIC_MAX_RESULTS = 8;
-
-let mantleToken = null;
-let mantleTokenFetchedAt = 0;
-async function getMantleToken() {
-  if (mantleToken && Date.now() - mantleTokenFetchedAt < MANTLE_TOKEN_TTL_MS) {
-    return mantleToken;
-  }
-  const { getToken } = require("@aws/bedrock-token-generator");
-  mantleToken = await getToken({
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      sessionToken: process.env.AWS_SESSION_TOKEN,
-    },
-    region: process.env.AWS_REGION,
-  });
-  mantleTokenFetchedAt = Date.now();
-  return mantleToken;
+function cosineSim(a, b) {
+  // Both vectors are already L2-normalized (Xenova's `normalize: true`),
+  // so the dot product IS the cosine similarity.
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
 }
 
-const semanticResultCache = new Map(); // key: `${state}:${q}` -> { relevantIds, fetchedAt }
+// Search runs on a self-hosted Meilisearch instance (community edition,
+// free) instead of the earlier Mantle-LLM-judges-relevance approach —
+// validated to be both faster (3-16ms vs 1.6-8s) and, once tuned, at least
+// as accurate. Query embeddings are still computed locally (Xenova,
+// unchanged from the original semantic-search implementation); Meilisearch
+// just does the storage/ranking instead of a hand-rolled cosine-similarity
+// loop and hand-rolled Levenshtein typo tolerance.
+//
+// Keyword and semantic matching run as two separate Meilisearch queries
+// (see handleSearch) rather than one hybrid call — a blended hybrid score
+// dilutes typo matches, since a misspelled query's own embedding is a
+// poor match even for the *correct* course.
+const MEILI_HOST = process.env.MEILI_HOST || "http://localhost:7700";
+const MEILI_API_KEY = process.env.MEILI_API_KEY || "";
+const meiliClient = new Meilisearch({ host: MEILI_HOST, apiKey: MEILI_API_KEY });
+const meiliIndex = meiliClient.index("courses");
+let meiliConfigured = false;
+async function ensureMeiliConfigured() {
+  if (meiliConfigured) return;
+  // .waitTask() matters here — updateSettings() only returns once the task
+  // is *enqueued*, not once it's actually applied. Without waiting, a
+  // search immediately after this could run against an index whose
+  // embedder isn't configured yet (verified: caused an intermittent
+  // "0 results" race on a cold index before this fix).
+  await meiliIndex
+    .updateSettings({
+      embedders: { default: { source: "userProvided", dimensions: 384 } },
+      filterableAttributes: ["stateAbbv", "licenseTypeId"],
+      searchableAttributes: ["name", "instructor", "tags", "description"],
+    })
+    .waitTask();
+  meiliConfigured = true;
+}
 
-async function judgeRelevance(query, candidates) {
-  const token = await getMantleToken();
-  const res = await fetch(`${MANTLE_BASE_URL}/responses`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "OpenAI-Project": MANTLE_PROJECT,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MANTLE_MODEL,
-      input: `Query: "${query}"\n\nCandidate courses (id: name):\n${candidates
-        .map((c) => `${c.id}: ${c.name}`)
-        .join("\n")}\n\nReturn at most ${SEMANTIC_MAX_RESULTS} course ids that are genuinely relevant to the query's meaning, even without exact keyword overlap, ordered from most to least relevant. If nothing is genuinely relevant, return an empty list rather than guessing.`,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "relevant_courses",
-          schema: {
-            type: "object",
-            properties: {
-              relevantIds: { type: "array", items: { type: "string" } },
-            },
-            required: ["relevantIds"],
-            additionalProperties: false,
-          },
-        },
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Mantle request failed: HTTP ${res.status}`);
+let embedderPromise = null;
+function getEmbedder() {
+  if (!embedderPromise) {
+    const { pipeline } = require("@xenova/transformers");
+    embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
   }
-  const data = await res.json();
-  const text = data.output?.[0]?.content?.[0]?.text;
-  const parsed = JSON.parse(text);
-  return Array.isArray(parsed.relevantIds) ? parsed.relevantIds : [];
+  return embedderPromise;
+}
+async function embed(text) {
+  const extractor = await getEmbedder();
+  const output = await extractor(text, { pooling: "mean", normalize: true });
+  return Array.from(output.data);
 }
 
 const MIME_TYPES = {
@@ -143,15 +125,6 @@ async function handleLookups(res) {
   }
 }
 
-// The Marketing API's own filter (`~~`) is a literal substring match with
-// no typo tolerance — "cardic" finds nothing even though "Cardiac..." is
-// right there. Instead of relying on it, we cache each state+profession's
-// full catalog in memory (paginating past the API's 100-per-request cap)
-// and do our own tokenized, typo-tolerant matching against it. This also
-// fixes the licenseTypeIds "first value wins" quirk, since each profession
-// gets its own cached catalog fetched with a single license type.
-const catalogCache = new Map(); // key: `${state}:${licenseTypeId}` -> { products, fetchedAt }
-
 async function fetchAllProducts(stateAbbv, licenseTypeId) {
   const products = [];
   let offset = 0;
@@ -181,106 +154,59 @@ function stripHtml(html) {
   return (html || "").replace(/<[^>]*>/g, " ");
 }
 
-function tokenize(text) {
-  return (text || "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-// Typo tolerance is scoped to short, curated fields (title/instructor/tags/
-// code) — fuzzy-matching every word in a 200+ word description caused
-// accidental edit-distance-1 collisions with unrelated courses (e.g.
-// "cardic" matched dozens of courses that merely mention "cardiac" in
-// passing). Descriptions still get literal substring matching, just not
-// fuzzy, to keep the "match text buried in the description" behavior
-// without the noise.
-function buildSearchableTokens(product) {
+function embeddingText(product) {
   const offering = (product.offerings || [])[0] || {};
-  const tagValues = (offering.tags || []).map((t) => t.tagValue).join(" ");
-  const titleText = [
-    product.name,
-    product.instructor,
-    offering.productCode,
-    tagValues,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const descriptionText = [
-    stripHtml(offering.description),
-    stripHtml(offering.properties && offering.properties.description),
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return {
-    titleTokens: tokenize(titleText),
-    descriptionTokens: tokenize(descriptionText),
-  };
+  const tags = (offering.tags || []).map((t) => t.tagValue).join(", ");
+  return [product.name, tags].filter(Boolean).join(". ");
 }
 
-async function getCatalog(stateAbbv, licenseTypeId) {
+// A product can legitimately appear under multiple states/professions with
+// different pricing/approval per combination, so the Meilisearch primary
+// key includes state+license — keying by productId alone would let a
+// later state's indexing pass silently overwrite an earlier state's data.
+function meiliDocId(product, stateAbbv, licenseTypeId) {
+  return `${product.productId}_${stateAbbv}_${licenseTypeId}`;
+}
+
+const indexedCombos = new Map(); // key: `${state}:${licenseTypeId}` -> last-indexed timestamp
+
+async function ensureIndexed(stateAbbv, licenseTypeId) {
   const key = `${stateAbbv}:${licenseTypeId}`;
-  const cached = catalogCache.get(key);
-  if (cached && Date.now() - cached.fetchedAt < CATALOG_TTL_MS) {
-    return cached.products;
-  }
+  const lastIndexed = indexedCombos.get(key);
+  if (lastIndexed && Date.now() - lastIndexed < INDEX_TTL_MS) return;
+
+  await ensureMeiliConfigured();
+
   // A handful of catalog entries in the test API are broken placeholders
   // (name/description/seoName all null or empty) — not a real, clickable
   // course, so exclude them before they can surface as a search result.
   const products = (await fetchAllProducts(stateAbbv, licenseTypeId)).filter(
     (p) => p.name
   );
-  for (const p of products) {
-    p.__tokens = buildSearchableTokens(p);
-  }
-  catalogCache.set(key, { products, fetchedAt: Date.now() });
-  return products;
-}
 
-// Standard DP Levenshtein edit distance.
-function levenshtein(a, b) {
-  if (a === b) return 0;
-  const al = a.length;
-  const bl = b.length;
-  if (al === 0) return bl;
-  if (bl === 0) return al;
-
-  let prev = new Array(bl + 1);
-  let curr = new Array(bl + 1);
-  for (let j = 0; j <= bl; j++) prev[j] = j;
-
-  for (let i = 1; i <= al; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= bl; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-    }
-    [prev, curr] = [curr, prev];
-  }
-  return prev[bl];
-}
-
-// Scales allowed typos with query-token length, matching common
-// typo-tolerant search conventions (Algolia/Elasticsearch use similar bands).
-function allowedTypos(len) {
-  if (len <= 4) return 0;
-  if (len <= 8) return 1;
-  return 2;
-}
-
-function productMatchesQuery({ titleTokens, descriptionTokens }, queryTokens) {
-  return queryTokens.every((qt) => {
-    const inTitle = titleTokens.some((t) => {
-      // t.includes(qt) only — NOT qt.includes(t). The reverse direction
-      // means any short common word (e.g. "a") is trivially a substring
-      // of almost any query, matching nearly everything.
-      if (t.includes(qt)) return true;
-      const maxDist = allowedTypos(qt.length);
-      return maxDist > 0 && levenshtein(qt, t) <= maxDist;
+  const documents = [];
+  for (const product of products) {
+    const offering = (product.offerings || [])[0] || {};
+    const vector = await embed(embeddingText(product));
+    documents.push({
+      id: meiliDocId(product, stateAbbv, licenseTypeId),
+      name: product.name,
+      instructor: product.instructor || "",
+      tags: (offering.tags || []).map((t) => t.tagValue),
+      description: stripHtml(offering.description).slice(0, 2000),
+      stateAbbv,
+      licenseTypeId,
+      product, // full raw product, returned as-is in search results
+      _vectors: { default: vector },
     });
-    if (inTitle) return true;
-    return descriptionTokens.some((t) => t.includes(qt));
-  });
+  }
+
+  if (documents.length) {
+    // Same reasoning as ensureMeiliConfigured() above — wait for the
+    // documents to actually finish indexing, not just get enqueued.
+    await meiliIndex.addDocuments(documents, { primaryKey: "id" }).waitTask();
+  }
+  indexedCombos.set(key, Date.now());
 }
 
 async function handleSearch(res, query) {
@@ -295,97 +221,85 @@ async function handleSearch(res, query) {
     return sendJson(res, 200, { products: [], total: 0 });
   }
 
-  const queryTokens = tokenize(q);
-
   try {
     const licenseTypeIds = await getAllLicenseTypeIds();
-    const catalogs = await Promise.all(
+    await Promise.all(
       licenseTypeIds.map((id) =>
-        getCatalog(stateAbbv, id).catch((err) => {
-          console.error(`Failed to load catalog for licenseTypeId ${id}:`, err.message);
-          return [];
+        ensureIndexed(stateAbbv, id).catch((err) => {
+          console.error(`Failed to index licenseTypeId ${id}:`, err.message);
         })
       )
     );
+
+    // Two separate passes rather than one hybrid query — verified this
+    // matters: a blended hybrid score dilutes typo matches (a misspelled
+    // query's own embedding is a poor match even for the *correct*
+    // course — "cardic" scores only 0.217 raw cosine against "Cardiac
+    // Rehabilitation" despite being an obvious intended typo), so keyword
+    // matching and semantic rescue need independent relevance rules, not
+    // one shared score.
+
+    // Pass 1: pure keyword/typo search. Meilisearch's own native engine
+    // handles this reliably (typo tolerance included) — no relevance
+    // gating needed, unlike the semantic pass below.
+    const keywordResult = await meiliIndex.search(q, {
+      filter: `stateAbbv = "${stateAbbv}"`,
+      limit: CANDIDATE_POOL_SIZE,
+      attributesToRetrieve: ["product"],
+    });
 
     const seen = new Set();
-    const keywordMatches = [];
-    for (const catalog of catalogs) {
-      for (const product of catalog) {
-        if (seen.has(product.productId)) continue;
-        if (!productMatchesQuery(product.__tokens, queryTokens)) continue;
-        seen.add(product.productId);
-        keywordMatches.push(product);
-      }
+    const products = [];
+    for (const hit of keywordResult.hits) {
+      const id = hit.product.productId;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      products.push({ ...hit.product, matchType: "keyword" });
     }
-    keywordMatches.sort((a, b) => a.name.localeCompare(b.name));
 
-    const products = keywordMatches.map((p) => ({ ...p, matchType: "keyword" }));
+    // Pass 2: semantic rescue for queries with no (or weak) keyword
+    // overlap, e.g. "back pain course" -> "Low Back Pain" despite "course"
+    // not appearing in any title. Gated by raw cosine similarity computed
+    // from the retrieved stored vectors — NOT Meilisearch's hybrid
+    // _rankingScore, which is normalized relative to the current result
+    // set and doesn't behave like an absolute relevance signal (verified:
+    // pure gibberish scored 0.61+ on that scale, indistinguishable from
+    // genuine matches). Raw cosine reproduces the original calibration:
+    // genuine matches 0.4-0.8+, irrelevant/nonsense queries 0.15-0.3.
+    const vector = await embed(q);
+    const semanticResult = await meiliIndex.search(q, {
+      vector,
+      hybrid: { embedder: "default", semanticRatio: 1 },
+      filter: `stateAbbv = "${stateAbbv}"`,
+      limit: CANDIDATE_POOL_SIZE,
+      attributesToRetrieve: ["product"],
+      retrieveVectors: true,
+    });
 
+    let semanticAdditions = 0;
+    for (const hit of semanticResult.hits) {
+      const id = hit.product.productId;
+      if (seen.has(id)) continue;
+      const docVector = hit._vectors?.default?.embeddings?.[0];
+      const rawCosine = docVector ? cosineSim(vector, docVector) : 0;
+      if (rawCosine < RELEVANCE_THRESHOLD) continue;
+      seen.add(id);
+      products.push({ ...hit.product, matchType: "semantic" });
+      semanticAdditions++;
+    }
+
+    // estimatedTotalHits is meaningful for the plain-keyword pass (unlike
+    // the hybrid/vector case above) — using products.length alone would
+    // silently cap broad queries at CANDIDATE_POOL_SIZE instead of
+    // reporting how many actually match (verified: a 2-char query hit
+    // exactly the pool size, not the true ~100+ match count).
     sendJson(res, 200, {
-      products: products.slice(0, limit).map(({ __tokens, ...p }) => p),
-      total: products.length,
+      products: products.slice(0, limit),
+      total: (keywordResult.estimatedTotalHits ?? products.length) + semanticAdditions,
     });
   } catch (err) {
+    console.error("Search failed:", err.message);
     sendJson(res, 502, { error: "Search request failed" });
-  }
-}
-
-// Separate, slower endpoint: the LLM relevance-judging call takes ~5-6s
-// against the full catalog, so the widget calls this after the fast
-// keyword pass above has already rendered, and merges results in when
-// they arrive rather than blocking the initial response.
-async function handleSemanticSearch(res, query) {
-  const stateAbbv = query.get("state");
-  const q = (query.get("q") || "").trim();
-
-  if (!stateAbbv) {
-    return sendJson(res, 400, { error: "state is required" });
-  }
-  if (q.length < 4) {
-    return sendJson(res, 200, { products: [] });
-  }
-
-  const cacheKey = `${stateAbbv}:${q.toLowerCase()}`;
-  const cached = semanticResultCache.get(cacheKey);
-  if (cached && Date.now() - cached.fetchedAt < SEMANTIC_RESULT_CACHE_TTL_MS) {
-    return sendJson(res, 200, { products: cached.products });
-  }
-
-  try {
-    const licenseTypeIds = await getAllLicenseTypeIds();
-    const catalogs = await Promise.all(
-      licenseTypeIds.map((id) =>
-        getCatalog(stateAbbv, id).catch((err) => {
-          console.error(`Failed to load catalog for licenseTypeId ${id}:`, err.message);
-          return [];
-        })
-      )
-    );
-
-    const byId = new Map();
-    for (const catalog of catalogs) {
-      for (const product of catalog) byId.set(product.productId, product);
-    }
-    const candidates = Array.from(byId.values()).map((p) => ({
-      id: p.productId,
-      name: p.name,
-    }));
-
-    const relevantIds = await judgeRelevance(q, candidates);
-    const products = relevantIds
-      .map((id) => byId.get(id))
-      .filter(Boolean)
-      .map((p) => ({ ...p, matchType: "semantic" }));
-
-    const clean = products.map(({ __tokens, ...p }) => p);
-    semanticResultCache.set(cacheKey, { products: clean, fetchedAt: Date.now() });
-    sendJson(res, 200, { products: clean });
-  } catch (err) {
-    console.error("Semantic search failed:", err.message);
-    // Progressive enhancement — the fast keyword results already
-    // rendered, so a failure here should be quiet, not break the page.
-    sendJson(res, 200, { products: [] });
   }
 }
 
@@ -423,9 +337,6 @@ const server = http.createServer(async (req, res) => {
   }
   if (parsed.pathname === "/api/search") {
     return handleSearch(res, parsed.searchParams);
-  }
-  if (parsed.pathname === "/api/search/semantic") {
-    return handleSemanticSearch(res, parsed.searchParams);
   }
   serveStatic(res, parsed.pathname);
 });

@@ -3,6 +3,9 @@ node_modules/
 *.log
 .env
 
+# Build artifact, not source — regenerate from wordpress-plugin/ws-course-search/
+wordpress-plugin/ws-course-search.zip
+
 # Manager scoping doc — internal PII, not project code
 PT_Intern_Project_Scoping_Form_Dawn_FINAL 7-7-26.pdf
 

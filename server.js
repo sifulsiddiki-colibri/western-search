@@ -77,6 +77,20 @@ async function embed(text) {
   return Array.from(output.data);
 }
 
+// One pipeline call for many texts, rather than one call per text —
+// measured ~30% faster for a ~370-item catalog. output.dims is
+// [texts.length, embeddingDim]; output.data is the flattened result.
+async function embedBatch(texts) {
+  const extractor = await getEmbedder();
+  const output = await extractor(texts, { pooling: "mean", normalize: true });
+  const [count, dim] = output.dims;
+  const vectors = [];
+  for (let i = 0; i < count; i++) {
+    vectors.push(Array.from(output.data.slice(i * dim, (i + 1) * dim)));
+  }
+  return vectors;
+}
+
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -169,12 +183,28 @@ function meiliDocId(product, stateAbbv, licenseTypeId) {
 }
 
 const indexedCombos = new Map(); // key: `${state}:${licenseTypeId}` -> last-indexed timestamp
+const inFlightIndexing = new Map(); // key -> in-progress indexing Promise
 
+// Called both when a state is first selected (fire-and-forget prefetch)
+// and from an actual search — those can now race for the same state, so
+// a second concurrent call awaits the same in-progress work instead of
+// redundantly re-fetching and re-embedding the same catalog.
 async function ensureIndexed(stateAbbv, licenseTypeId) {
   const key = `${stateAbbv}:${licenseTypeId}`;
   const lastIndexed = indexedCombos.get(key);
   if (lastIndexed && Date.now() - lastIndexed < INDEX_TTL_MS) return;
 
+  const inFlight = inFlightIndexing.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = doIndex(stateAbbv, licenseTypeId, key).finally(() => {
+    inFlightIndexing.delete(key);
+  });
+  inFlightIndexing.set(key, promise);
+  return promise;
+}
+
+async function doIndex(stateAbbv, licenseTypeId, key) {
   await ensureMeiliConfigured();
 
   // A handful of catalog entries in the test API are broken placeholders
@@ -184,11 +214,14 @@ async function ensureIndexed(stateAbbv, licenseTypeId) {
     (p) => p.name
   );
 
-  const documents = [];
-  for (const product of products) {
+  // Batched (one pipeline call for all texts) rather than one embed() call
+  // per product — measured ~30% faster for a ~370-product catalog.
+  const vectors = products.length
+    ? await embedBatch(products.map(embeddingText))
+    : [];
+  const documents = products.map((product, i) => {
     const offering = (product.offerings || [])[0] || {};
-    const vector = await embed(embeddingText(product));
-    documents.push({
+    return {
       id: meiliDocId(product, stateAbbv, licenseTypeId),
       name: product.name,
       instructor: product.instructor || "",
@@ -197,9 +230,9 @@ async function ensureIndexed(stateAbbv, licenseTypeId) {
       stateAbbv,
       licenseTypeId,
       product, // full raw product, returned as-is in search results
-      _vectors: { default: vector },
-    });
-  }
+      _vectors: { default: vectors[i] },
+    };
+  });
 
   if (documents.length) {
     // Same reasoning as ensureMeiliConfigured() above — wait for the
@@ -207,6 +240,35 @@ async function ensureIndexed(stateAbbv, licenseTypeId) {
     await meiliIndex.addDocuments(documents, { primaryKey: "id" }).waitTask();
   }
   indexedCombos.set(key, Date.now());
+}
+
+// Indexing a never-before-searched state costs several real seconds — not
+// from anything in this code, but from the Marketing API itself: its
+// *first* response for a fresh state+profession query takes ~3.8s
+// (measured directly), vs ~200-350ms for subsequent paginated pages.
+// Nothing to optimize there since it's an external dependency, but the
+// cost doesn't have to land on the user's actual search — this endpoint
+// lets the widget kick off indexing the moment a state is picked, so it
+// usually finishes while the user is still typing their query instead of
+// blocking the search itself.
+async function handleWarm(res, query) {
+  const stateAbbv = query.get("state");
+  if (!stateAbbv) {
+    return sendJson(res, 400, { error: "state is required" });
+  }
+  try {
+    const licenseTypeIds = await getAllLicenseTypeIds();
+    await Promise.all(
+      licenseTypeIds.map((id) =>
+        ensureIndexed(stateAbbv, id).catch((err) => {
+          console.error(`Failed to warm licenseTypeId ${id}:`, err.message);
+        })
+      )
+    );
+    sendJson(res, 200, { warmed: true });
+  } catch (err) {
+    sendJson(res, 502, { error: "Warm request failed" });
+  }
 }
 
 async function handleSearch(res, query) {
@@ -334,6 +396,9 @@ const server = http.createServer(async (req, res) => {
 
   if (parsed.pathname === "/api/lookups") {
     return handleLookups(res);
+  }
+  if (parsed.pathname === "/api/warm") {
+    return handleWarm(res, parsed.searchParams);
   }
   if (parsed.pathname === "/api/search") {
     return handleSearch(res, parsed.searchParams);

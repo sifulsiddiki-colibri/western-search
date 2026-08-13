@@ -21,6 +21,9 @@
   const LOOKUPS_ENDPOINT = WP_CONFIG
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search_lookups`
     : "/api/lookups";
+  const WARM_ENDPOINT = WP_CONFIG
+    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_warm`
+    : "/api/warm";
 
   const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
@@ -123,7 +126,21 @@
       this.recent = this.loadRecent();
 
       this.render();
+      if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
       this.loadLookups().then(() => this.applyInitialQuery());
+    }
+
+    // Indexing a state a user hasn't searched yet costs several real
+    // seconds (the Marketing API's own first-response latency, not
+    // anything on our end) — firing this the moment a state is known,
+    // rather than waiting for an actual search, means that cost usually
+    // lands while the user is still typing instead of blocking results.
+    // Fire-and-forget: a failure here just means the next real search
+    // pays the indexing cost itself, same as before this existed.
+    warmState(stateAbbv) {
+      fetch(withParams(WARM_ENDPOINT, new URLSearchParams({ state: stateAbbv }))).catch(
+        () => {}
+      );
     }
 
     applyInitialQuery() {
@@ -225,6 +242,7 @@
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
         this.saveContext();
+        if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
         this.runSearch();
       });
       this.input.addEventListener("input", () => this.onInput());

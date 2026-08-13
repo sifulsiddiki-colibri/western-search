@@ -114,3 +114,13 @@ function ws_search_handle_lookups() {
 }
 add_action( 'wp_ajax_ws_search_lookups', 'ws_search_handle_lookups' );
 add_action( 'wp_ajax_nopriv_ws_search_lookups', 'ws_search_handle_lookups' );
+
+// Fire-and-forget from the widget the moment a state is selected, so the
+// backend's one-time indexing cost for a fresh state (several real
+// seconds, from the Marketing API's own first-response latency) usually
+// finishes while the user is still typing instead of blocking the search.
+function ws_search_handle_warm() {
+	ws_search_proxy( 'api/warm', array( 'state' => sanitize_text_field( $_GET['state'] ?? '' ) ) );
+}
+add_action( 'wp_ajax_ws_search_warm', 'ws_search_handle_warm' );
+add_action( 'wp_ajax_nopriv_ws_search_warm', 'ws_search_handle_warm' );

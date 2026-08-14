@@ -159,6 +159,11 @@
       this.overlay.hidden = false;
       document.body.style.overflow = "hidden";
       this.triggerBtn.setAttribute("aria-expanded", "true");
+      // Earlier sizeStateSelect() calls (on construction/lookups load) ran
+      // while the overlay was still hidden — elements inside a
+      // display:none subtree report offsetWidth 0, so that measurement
+      // was against empty text. Redo it now that it's actually rendered.
+      this.sizeStateSelect();
       // Deferred so focus lands after the overlay is actually visible.
       requestAnimationFrame(() => this.input.focus());
     }

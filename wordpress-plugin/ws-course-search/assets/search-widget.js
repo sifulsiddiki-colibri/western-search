@@ -227,6 +227,7 @@
                   <select class="ws-search__state" aria-label="State">
                     <option value="">All states</option>
                   </select>
+                  <span class="ws-search__select-measure" aria-hidden="true"></span>
                 </div>
                 <div class="ws-search__input-wrap">
                   <span class="ws-search__input-icon">${SEARCH_ICON}</span>
@@ -263,6 +264,7 @@
       this.overlay = this.root.querySelector(".ws-search__overlay");
       this.modalCloseBtn = this.root.querySelector(".ws-search__modal-close");
       this.stateSelect = this.root.querySelector(".ws-search__state");
+      this.selectMeasureEl = this.root.querySelector(".ws-search__select-measure");
       this.input = this.root.querySelector(".ws-search__input");
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
@@ -274,9 +276,11 @@
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
         this.saveContext();
+        this.sizeStateSelect();
         if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
         this.runSearch();
       });
+      this.sizeStateSelect();
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
       this.input.addEventListener("focus", () => {
@@ -356,9 +360,23 @@
 
         if (this.context.stateAbbv)
           this.stateSelect.value = this.context.stateAbbv;
+        this.sizeStateSelect();
       } catch (err) {
         console.error("WSCourseSearch: failed to load lookups", err);
       }
+    }
+
+    // Native <select> elements size to their widest *option*, not the
+    // currently selected one, so "Florida" and "District of Columbia"
+    // otherwise render at the same fixed width. Measuring the selected
+    // option's text in a hidden span and applying that as an explicit
+    // width lets the field shrink/grow with the actual selection.
+    sizeStateSelect() {
+      const selected = this.stateSelect.options[this.stateSelect.selectedIndex];
+      this.selectMeasureEl.textContent = selected ? selected.textContent : "";
+      const textWidth = this.selectMeasureEl.offsetWidth;
+      const CHROME_WIDTH = 14 + 34 + 2; // padding-left + padding-right (incl. arrow) + border
+      this.stateSelect.style.width = `${textWidth + CHROME_WIDTH}px`;
     }
 
     onInput() {

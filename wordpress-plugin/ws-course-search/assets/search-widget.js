@@ -301,7 +301,7 @@
         this.onInput();
         this.input.focus();
       });
-      this.submitBtn.addEventListener("click", () => this.runSearch());
+      this.submitBtn.addEventListener("click", () => this.runSearch(false, true));
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this.closeResults();
       });
@@ -342,7 +342,7 @@
       this.recentPillsEl.querySelectorAll(".ws-search__pill").forEach((pill) => {
         pill.addEventListener("click", () => {
           this.input.value = pill.dataset.query;
-          this.runSearch();
+          this.runSearch(false, true);
         });
       });
 
@@ -423,12 +423,13 @@
       } else if (e.key === "Enter") {
         if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
           e.preventDefault();
+          this.saveRecent(this.input.value.trim());
           window.location.href = this.buildProductUrl(
             this.lastResults[this.activeIndex],
             this.context.stateAbbv
           );
         } else {
-          this.runSearch();
+          this.runSearch(false, true);
         }
       }
     }
@@ -441,7 +442,12 @@
       if (active) active.scrollIntoView({ block: "nearest" });
     }
 
-    async runSearch(expand) {
+    // `explicit` distinguishes a deliberate commit (Enter, Search button,
+    // clicking a result/pill) from the automatic debounced search that
+    // runs while the user is still typing — only explicit commits get
+    // saved to "recent searches", otherwise every intermediate keystroke
+    // ("ca", "car", "card", ...) would clutter that list.
+    async runSearch(expand, explicit) {
       const query = this.input.value.trim();
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
@@ -476,7 +482,7 @@
         const data = await res.json();
         this.lastResults = data.products || [];
         this.lastTotal = data.total || this.lastResults.length;
-        this.saveRecent(query);
+        if (explicit) this.saveRecent(query);
         this.renderResults(query);
       } catch (err) {
         if (err.name === "AbortError") return;
@@ -545,8 +551,11 @@
 
       const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
       if (seeAllBtn) {
-        seeAllBtn.addEventListener("click", () => this.runSearch(true));
+        seeAllBtn.addEventListener("click", () => this.runSearch(true, true));
       }
+      this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
+        a.addEventListener("click", () => this.saveRecent(query));
+      });
 
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");

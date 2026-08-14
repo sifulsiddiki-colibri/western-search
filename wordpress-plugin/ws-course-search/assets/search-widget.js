@@ -120,6 +120,7 @@
       this.lastResults = [];
       this.lastTotal = 0;
       this.expanded = false;
+      this.isOpen = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
 
       this.context = this.loadContext();
@@ -146,10 +147,28 @@
     applyInitialQuery() {
       const q = new URLSearchParams(window.location.search).get("q");
       if (q) {
+        this.openModal();
         this.input.value = q;
         this.clearBtn.hidden = false;
         this.runSearch();
       }
+    }
+
+    openModal() {
+      this.isOpen = true;
+      this.overlay.hidden = false;
+      document.body.style.overflow = "hidden";
+      this.triggerBtn.setAttribute("aria-expanded", "true");
+      // Deferred so focus lands after the overlay is actually visible.
+      requestAnimationFrame(() => this.input.focus());
+    }
+
+    closeModal() {
+      this.isOpen = false;
+      this.overlay.hidden = true;
+      document.body.style.overflow = "";
+      this.triggerBtn.setAttribute("aria-expanded", "false");
+      this.closeResults();
     }
 
     loadContext() {
@@ -190,46 +209,59 @@
 
     render() {
       this.root.innerHTML = `
-        <div class="ws-search">
-          <p class="ws-search__eyebrow"></p>
-          <h2 class="ws-search__heading">What do you need to complete?</h2>
+        <button type="button" class="ws-search-trigger" aria-label="Search courses" aria-expanded="false">
+          ${SEARCH_ICON}
+        </button>
 
-          <div class="ws-search__controls">
-            <div class="ws-search__field-group">
-              <label>State</label>
-              <select class="ws-search__state" aria-label="State">
-                <option value="">All states</option>
-              </select>
+        <div class="ws-search__overlay" hidden>
+          <div class="ws-search__modal">
+            <button type="button" class="ws-search__modal-close" aria-label="Close search">&times;</button>
+
+            <div class="ws-search">
+              <p class="ws-search__eyebrow"></p>
+              <h2 class="ws-search__heading">What do you need to complete?</h2>
+
+              <div class="ws-search__controls">
+                <div class="ws-search__field-group">
+                  <label>State</label>
+                  <select class="ws-search__state" aria-label="State">
+                    <option value="">All states</option>
+                  </select>
+                </div>
+                <div class="ws-search__input-wrap">
+                  <span class="ws-search__input-icon">${SEARCH_ICON}</span>
+                  <input
+                    type="text"
+                    class="ws-search__input"
+                    placeholder="Try &quot;cardiac&quot; or &quot;ethics&quot;"
+                    aria-label="Search courses"
+                    autocomplete="off"
+                    role="combobox"
+                    aria-expanded="false"
+                    aria-owns="ws-search-results"
+                  />
+                  <button type="button" class="ws-search__clear" hidden>Clear</button>
+                </div>
+                <button type="button" class="ws-search__submit">Search</button>
+              </div>
+
+              <div class="ws-search__recent" hidden>
+                <div class="ws-search__recent-header">
+                  <span>Recent searches</span>
+                  <button type="button" class="ws-search__recent-clear">Clear</button>
+                </div>
+                <div class="ws-search__recent-pills"></div>
+              </div>
+
+              <ul class="ws-search__results" id="ws-search-results" hidden></ul>
             </div>
-            <div class="ws-search__input-wrap">
-              <span class="ws-search__input-icon">${SEARCH_ICON}</span>
-              <input
-                type="text"
-                class="ws-search__input"
-                placeholder="Try &quot;cardiac&quot; or &quot;ethics&quot;"
-                aria-label="Search courses"
-                autocomplete="off"
-                role="combobox"
-                aria-expanded="false"
-                aria-owns="ws-search-results"
-              />
-              <button type="button" class="ws-search__clear" hidden>Clear</button>
-            </div>
-            <button type="button" class="ws-search__submit">Search</button>
           </div>
-
-          <div class="ws-search__recent" hidden>
-            <div class="ws-search__recent-header">
-              <span>Recent searches</span>
-              <button type="button" class="ws-search__recent-clear">Clear</button>
-            </div>
-            <div class="ws-search__recent-pills"></div>
-          </div>
-
-          <ul class="ws-search__results" id="ws-search-results" hidden></ul>
         </div>
       `;
 
+      this.triggerBtn = this.root.querySelector(".ws-search-trigger");
+      this.overlay = this.root.querySelector(".ws-search__overlay");
+      this.modalCloseBtn = this.root.querySelector(".ws-search__modal-close");
       this.stateSelect = this.root.querySelector(".ws-search__state");
       this.input = this.root.querySelector(".ws-search__input");
       this.clearBtn = this.root.querySelector(".ws-search__clear");
@@ -258,6 +290,20 @@
       this.submitBtn.addEventListener("click", () => this.runSearch());
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this.closeResults();
+      });
+
+      this.triggerBtn.addEventListener("click", () => this.openModal());
+      this.modalCloseBtn.addEventListener("click", () => this.closeModal());
+      this.overlay.addEventListener("click", (e) => {
+        if (e.target === this.overlay) this.closeModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape" || !this.isOpen) return;
+        if (!this.resultsEl.hidden) {
+          this.closeResults();
+        } else {
+          this.closeModal();
+        }
       });
 
       this.renderRecent();
@@ -356,8 +402,6 @@
         } else {
           this.runSearch();
         }
-      } else if (e.key === "Escape") {
-        this.closeResults();
       }
     }
 

@@ -32,7 +32,12 @@ if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
 }
 
 const WS_CATALOG_PAGE_SIZE   = 100;  // Marketing API's hard per-request cap.
-const WS_INDEX_TTL           = 900;  // 15 min before re-indexing a state+profession.
+// Course catalogs don't change minute-to-minute, so this can be generous —
+// a short TTL just means more real users hit the several-second cold-index
+// cost (the Marketing API's own first-page latency) for no real freshness
+// benefit. 6h keeps same-day catalog changes visible while making that
+// cost rare in practice instead of a recurring "switch state, wait" hit.
+const WS_INDEX_TTL           = 6 * 60 * 60;
 const WS_CANDIDATE_POOL_SIZE = 50;   // over-fetched, then relevance-filtered + deduped.
 const WS_RELEVANCE_THRESHOLD = 0.4;  // raw cosine cutoff — see ws_search_handle_search().
 

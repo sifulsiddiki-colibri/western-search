@@ -288,6 +288,12 @@
         this.saveContext();
         this.sizeStateSelect();
         if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
+        // A state that hasn't been searched in a while pays a real,
+        // several-second indexing cost (see ensureIndexed on the
+        // backend) before results come back — show that a search is in
+        // flight instead of leaving the previous state's stale results
+        // sitting there looking frozen.
+        if (this.input.value.trim()) this.showLoading();
         this.runSearch();
       });
       this.sizeStateSelect();

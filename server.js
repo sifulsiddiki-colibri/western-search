@@ -17,7 +17,12 @@ const { Meilisearch } = require("meilisearch");
 const PORT = process.env.PORT || 8080;
 const API_BASE = "https://test-api-ms.westernschools.com";
 const CATALOG_PAGE_SIZE = 100; // the API's hard per-request cap
-const INDEX_TTL_MS = 15 * 60 * 1000; // how long before re-indexing a state+profession
+// Course catalogs don't change minute-to-minute, so this can be generous —
+// a short TTL just means more real users hit the several-second cold-index
+// cost (the Marketing API's own first-page latency) for no real freshness
+// benefit. 6h keeps same-day catalog changes visible while making that
+// cost rare in practice instead of a recurring "switch state, wait" hit.
+const INDEX_TTL_MS = 6 * 60 * 60 * 1000;
 const CANDIDATE_POOL_SIZE = 50; // over-fetched, then relevance-filtered + deduped
 const RELEVANCE_THRESHOLD = 0.4; // raw cosine cutoff — see handleSearch
 

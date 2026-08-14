@@ -171,12 +171,17 @@
       this.closeResults();
     }
 
+    // Falls back to FL (matching the shortcode's own default_state="FL")
+    // so the widget always opens with a real state selected, rather than
+    // "All states" — whoever embeds it can still override via the
+    // defaultState option, but forgetting to set it shouldn't leave
+    // search unusable until the visitor manually picks one.
     loadContext() {
       try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
+        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "FL" };
       } catch (e) {
-        return { stateAbbv: this.options.defaultState || "" };
+        return { stateAbbv: this.options.defaultState || "FL" };
       }
     }
 

@@ -5,7 +5,7 @@
  *              semantic suggestions. Talks directly to a self-hosted
  *              Meilisearch instance via wp_remote_* calls — no separate
  *              application server required.
- * Version:     3.0.0
+ * Version:     3.1.0
  * Author:      Siful Siddiki
  */
 
@@ -29,6 +29,95 @@ if ( ! defined( 'WS_MEILI_API_KEY' ) ) {
 }
 if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
 	define( 'WS_MARKETING_API_BASE', 'https://test-api-ms.westernschools.com' );
+}
+
+/**
+ * On hosts where wp-config.php isn't editable (managed/staging hosting with
+ * WP Admin-only access), the constants above can't be set. Settings ->
+ * WS Course Search stores the same two values as options instead; an option
+ * wins when set, otherwise these fall back to the constants so a
+ * wp-config.php-based install keeps working unchanged.
+ */
+function ws_get_meili_host() {
+	$option = get_option( 'ws_meili_host' );
+	return $option ? $option : WS_MEILI_HOST;
+}
+function ws_get_meili_api_key() {
+	$option = get_option( 'ws_meili_api_key' );
+	return $option ? $option : WS_MEILI_API_KEY;
+}
+
+// ---------------------------------------------------------------------------
+// Settings page (Settings -> WS Course Search)
+// ---------------------------------------------------------------------------
+
+function ws_meili_add_settings_page() {
+	add_options_page(
+		'WS Course Search',
+		'WS Course Search',
+		'manage_options',
+		'ws-course-search',
+		'ws_meili_render_settings_page'
+	);
+}
+add_action( 'admin_menu', 'ws_meili_add_settings_page' );
+
+function ws_meili_register_settings() {
+	register_setting( 'ws_course_search', 'ws_meili_host', array( 'sanitize_callback' => 'esc_url_raw' ) );
+	register_setting( 'ws_course_search', 'ws_meili_api_key', array( 'sanitize_callback' => 'sanitize_text_field' ) );
+
+	add_settings_section(
+		'ws_meili_main',
+		'Meilisearch connection',
+		function () {
+			echo '<p>Overrides the ' . esc_html( 'WS_MEILI_HOST' ) . ' / ' . esc_html( 'WS_MEILI_API_KEY' ) .
+				' constants below, for hosts where wp-config.php isn\'t editable. Leave blank to use those instead.</p>';
+		},
+		'ws-course-search'
+	);
+
+	add_settings_field(
+		'ws_meili_host',
+		'Meilisearch host',
+		function () {
+			printf(
+				'<input type="url" name="ws_meili_host" value="%s" class="regular-text" placeholder="%s" />',
+				esc_attr( get_option( 'ws_meili_host' ) ),
+				esc_attr( WS_MEILI_HOST )
+			);
+		},
+		'ws-course-search',
+		'ws_meili_main'
+	);
+
+	add_settings_field(
+		'ws_meili_api_key',
+		'Meilisearch API key',
+		function () {
+			printf(
+				'<input type="password" name="ws_meili_api_key" value="%s" class="regular-text" autocomplete="off" />',
+				esc_attr( get_option( 'ws_meili_api_key' ) )
+			);
+		},
+		'ws-course-search',
+		'ws_meili_main'
+	);
+}
+add_action( 'admin_init', 'ws_meili_register_settings' );
+
+function ws_meili_render_settings_page() {
+	?>
+	<div class="wrap">
+		<h1>WS Course Search</h1>
+		<form action="options.php" method="post">
+			<?php
+			settings_fields( 'ws_course_search' );
+			do_settings_sections( 'ws-course-search' );
+			submit_button();
+			?>
+		</form>
+	</div>
+	<?php
 }
 
 const WS_CATALOG_PAGE_SIZE   = 100;  // Marketing API's hard per-request cap.
@@ -101,7 +190,7 @@ function ws_meili_request( $method, $path, $body = null, $blocking = true ) {
 		'timeout'  => 20,
 		'blocking' => $blocking,
 		'headers'  => array(
-			'Authorization' => 'Bearer ' . WS_MEILI_API_KEY,
+			'Authorization' => 'Bearer ' . ws_get_meili_api_key(),
 			'Content-Type'  => 'application/json',
 		),
 	);
@@ -109,7 +198,7 @@ function ws_meili_request( $method, $path, $body = null, $blocking = true ) {
 		$args['body'] = wp_json_encode( $body );
 	}
 
-	$response = wp_remote_request( trailingslashit( WS_MEILI_HOST ) . $path, $args );
+	$response = wp_remote_request( trailingslashit( ws_get_meili_host() ) . $path, $args );
 
 	if ( ! $blocking ) {
 		return array();

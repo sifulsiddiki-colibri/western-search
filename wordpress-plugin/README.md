@@ -60,10 +60,20 @@ the deployed system.
    The narrow template (name + tags only, not the full description) matters —
    embedding full descriptions dilutes relevance filtering because course
    descriptions share a lot of generic boilerplate language.
-2. Set `WS_MEILI_HOST` and `WS_MEILI_API_KEY` to point at it — define them
-   in `wp-config.php` before this plugin loads. Defaults to
-   `http://localhost:7700` with no API key (local development only).
-3. Copy the `ws-course-search/` folder into `wp-content/plugins/`.
+2. Point the plugin at it, either way:
+   - **File access** (SFTP/SSH to the server): define `WS_MEILI_HOST` and
+     `WS_MEILI_API_KEY` in `wp-config.php` before this plugin loads.
+     Defaults to `http://localhost:7700` with no API key (local development
+     only).
+   - **WP Admin only** (managed/staging hosting, no file access): activate
+     the plugin first (steps 3–4 below), then go to
+     **Settings → WS Course Search** and enter the host + key there. Stored
+     as options; takes priority over the constants above if both are set.
+3. Install the plugin — either copy the `ws-course-search/` folder into
+   `wp-content/plugins/` (file access), or **Plugins → Add New → Upload
+   Plugin** and upload `ws-course-search.zip` (WP Admin only — this is also
+   how to push an updated zip to replace an already-installed version, with
+   no file access needed).
 4. Activate it from the WordPress admin (Plugins → Installed Plugins).
 5. Add `[ws_course_search]` to the homepage and product listing page
    templates (or directly in the block editor as a Shortcode block).
@@ -71,9 +81,13 @@ the deployed system.
 
 ## Still open
 
-- **Where does Meilisearch actually run in production?** Still a real
-  hosting decision (small VM, container service, etc.) needed before this
-  goes live anywhere real — deliberately out of scope here.
+- ~~Where does Meilisearch actually run in production?~~ Fronted by a
+  Cloudflare Worker (`meilisearch-mcp`, separate repo, built from Colibri's
+  `mcp-agent-template`) that reverse-proxies `WS_MEILI_HOST` to the real
+  Meilisearch instance, so the real API key never has to live in WordPress
+  config at all — only a separate proxy token does. Production hosting for
+  the *real* Meilisearch instance itself (Meilisearch Cloud vs. self-hosted)
+  is a smaller, still-open follow-up once the trial window is evaluated.
 - Only the `nursing` profession's course-URL slug is confirmed against a
   real page (in `assets/search-widget.js`). The other two are a
   best-guess slugification.

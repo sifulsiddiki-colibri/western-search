@@ -50,23 +50,11 @@ const MEILI_HOST = process.env.MEILI_HOST || "http://localhost:7700";
 const MEILI_API_KEY = process.env.MEILI_API_KEY || "";
 const meiliClient = new Meilisearch({ host: MEILI_HOST, apiKey: MEILI_API_KEY });
 const meiliIndex = meiliClient.index("courses");
-let meiliConfigured = false;
-async function ensureMeiliConfigured() {
-  if (meiliConfigured) return;
-  // .waitTask() matters here — updateSettings() only returns once the task
-  // is *enqueued*, not once it's actually applied. Without waiting, a
-  // search immediately after this could run against an index whose
-  // embedder isn't configured yet (verified: caused an intermittent
-  // "0 results" race on a cold index before this fix).
-  await meiliIndex
-    .updateSettings({
-      embedders: { default: { source: "userProvided", dimensions: 384 } },
-      filterableAttributes: ["stateAbbv", "licenseTypeId"],
-      searchableAttributes: ["name", "instructor", "tags", "description"],
-    })
-    .waitTask();
-  meiliConfigured = true;
-}
+// Index settings (embedders, filterable/searchable attributes) are
+// configured once, out-of-band, with a privileged key — see README. The
+// runtime key only needs `search` + `documents.add`, so this process never
+// calls updateSettings() itself; keeping that permission out of the
+// running app's key is the point, not an oversight.
 
 let embedderPromise = null;
 function getEmbedder() {
@@ -210,8 +198,6 @@ async function ensureIndexed(stateAbbv, licenseTypeId) {
 }
 
 async function doIndex(stateAbbv, licenseTypeId, key) {
-  await ensureMeiliConfigured();
-
   // A handful of catalog entries in the test API are broken placeholders
   // (name/description/seoName all null or empty) — not a real, clickable
   // course, so exclude them before they can surface as a search result.
@@ -240,8 +226,10 @@ async function doIndex(stateAbbv, licenseTypeId, key) {
   });
 
   if (documents.length) {
-    // Same reasoning as ensureMeiliConfigured() above — wait for the
-    // documents to actually finish indexing, not just get enqueued.
+    // .waitTask() matters here — addDocuments() only returns once the task
+    // is *enqueued*, not once it's actually applied. Without waiting, a
+    // search immediately after this could run against an index that
+    // doesn't have these documents yet.
     await meiliIndex.addDocuments(documents, { primaryKey: "id" }).waitTask();
   }
   indexedCombos.set(key, Date.now());

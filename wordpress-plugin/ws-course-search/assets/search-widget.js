@@ -3,9 +3,11 @@
  * Framework-free — designed to drop into the WordPress theme via a single
  * <div id="ws-course-search"></div> + this script tag.
  *
- * Keyword/typo-tolerant matching and AI semantic rescue both run on the
- * backend (server.js, backed by a self-hosted Meilisearch index) and come
- * back in a single fast call — no separate slow AI pass to wait for here.
+ * Renders as an always-visible hero search box (per the Search v2 design),
+ * not a click-to-open modal. Keyword/typo-tolerant matching and AI semantic
+ * rescue both run on the backend (server.js, backed by a self-hosted
+ * Meilisearch index) and come back in a single fast call — no separate slow
+ * AI pass to wait for here.
  */
 (function () {
   // Same-origin backend — server.js's /api/* routes when running standalone
@@ -109,6 +111,7 @@
   const SEARCH_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
   const CLOCK_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const SPARKLE_ICON = `<svg viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 2l1.2 4.8L16 8l-4.8 1.2L10 14l-1.2-4.8L4 8l4.8-1.2L10 2z"/><path d="M16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6L16 13z"/></svg>`;
+  const PIN_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 18s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/></svg>`;
 
   class WSCourseSearch {
     constructor(root, options) {
@@ -120,7 +123,6 @@
       this.lastResults = [];
       this.lastTotal = 0;
       this.expanded = false;
-      this.isOpen = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
 
       this.context = this.loadContext();
@@ -147,33 +149,10 @@
     applyInitialQuery() {
       const q = new URLSearchParams(window.location.search).get("q");
       if (q) {
-        this.openModal();
         this.input.value = q;
         this.clearBtn.hidden = false;
         this.runSearch();
       }
-    }
-
-    openModal() {
-      this.isOpen = true;
-      this.overlay.hidden = false;
-      document.body.style.overflow = "hidden";
-      this.triggerBtn.setAttribute("aria-expanded", "true");
-      // Earlier sizeStateSelect() calls (on construction/lookups load) ran
-      // while the overlay was still hidden — elements inside a
-      // display:none subtree report offsetWidth 0, so that measurement
-      // was against empty text. Redo it now that it's actually rendered.
-      this.sizeStateSelect();
-      // Deferred so focus lands after the overlay is actually visible.
-      requestAnimationFrame(() => this.input.focus());
-    }
-
-    closeModal() {
-      this.isOpen = false;
-      this.overlay.hidden = true;
-      document.body.style.overflow = "";
-      this.triggerBtn.setAttribute("aria-expanded", "false");
-      this.closeResults();
     }
 
     // Falls back to FL (matching the shortcode's own default_state="FL")
@@ -219,43 +198,38 @@
 
     render() {
       this.root.innerHTML = `
-        <button type="button" class="ws-search-trigger" aria-label="Search courses" aria-expanded="false">
-          ${SEARCH_ICON}
-        </button>
+        <div class="ws-search-hero">
+          <p class="ws-search__eyebrow"></p>
+          <h2 class="ws-search__heading">What are you looking to learn today?</h2>
+          <p class="ws-search__subheading">Search our full library of board-approved courses, bundles, and membership plans.</p>
 
-        <div class="ws-search__overlay" hidden>
-          <div class="ws-search__modal">
-            <button type="button" class="ws-search__modal-close" aria-label="Close search">&times;</button>
-
-            <div class="ws-search">
-              <p class="ws-search__eyebrow"></p>
-              <h2 class="ws-search__heading">What do you need to complete?</h2>
-
-              <div class="ws-search__controls">
-                <div class="ws-search__field-group">
-                  <label>State</label>
-                  <select class="ws-search__state" aria-label="State">
-                    <option value="">All states</option>
-                  </select>
-                  <span class="ws-search__select-measure" aria-hidden="true"></span>
-                </div>
-                <div class="ws-search__input-wrap">
-                  <span class="ws-search__input-icon">${SEARCH_ICON}</span>
-                  <input
-                    type="text"
-                    class="ws-search__input"
-                    placeholder="Try &quot;cardiac&quot; or &quot;ethics&quot;"
-                    aria-label="Search courses"
-                    autocomplete="off"
-                    role="combobox"
-                    aria-expanded="false"
-                    aria-owns="ws-search-results"
-                  />
-                  <button type="button" class="ws-search__clear" hidden>Clear</button>
-                </div>
-                <button type="button" class="ws-search__submit">Search</button>
+          <div class="ws-search__panel">
+            <div class="ws-search__controls">
+              <div class="ws-search__state-wrap">
+                <span class="ws-search__state-icon">${PIN_ICON}</span>
+                <select class="ws-search__state" aria-label="State">
+                  <option value="">Select your state</option>
+                </select>
+                <span class="ws-search__select-measure" aria-hidden="true"></span>
               </div>
+              <div class="ws-search__input-wrap">
+                <span class="ws-search__input-icon">${SEARCH_ICON}</span>
+                <input
+                  type="text"
+                  class="ws-search__input"
+                  placeholder="Search by course, topics, or license type"
+                  aria-label="Search courses"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-owns="ws-search-results"
+                />
+                <button type="button" class="ws-search__clear" hidden>Clear</button>
+              </div>
+              <button type="button" class="ws-search__submit">${SEARCH_ICON}<span>Search</span></button>
+            </div>
 
+            <div class="ws-search__dropdown">
               <div class="ws-search__recent" hidden>
                 <div class="ws-search__recent-header">
                   <span>Recent searches</span>
@@ -270,9 +244,6 @@
         </div>
       `;
 
-      this.triggerBtn = this.root.querySelector(".ws-search-trigger");
-      this.overlay = this.root.querySelector(".ws-search__overlay");
-      this.modalCloseBtn = this.root.querySelector(".ws-search__modal-close");
       this.stateSelect = this.root.querySelector(".ws-search__state");
       this.selectMeasureEl = this.root.querySelector(".ws-search__select-measure");
       this.input = this.root.querySelector(".ws-search__input");
@@ -311,19 +282,8 @@
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this.closeResults();
       });
-
-      this.triggerBtn.addEventListener("click", () => this.openModal());
-      this.modalCloseBtn.addEventListener("click", () => this.closeModal());
-      this.overlay.addEventListener("click", (e) => {
-        if (e.target === this.overlay) this.closeModal();
-      });
       document.addEventListener("keydown", (e) => {
-        if (e.key !== "Escape" || !this.isOpen) return;
-        if (!this.resultsEl.hidden) {
-          this.closeResults();
-        } else {
-          this.closeModal();
-        }
+        if (e.key === "Escape" && !this.resultsEl.hidden) this.closeResults();
       });
 
       this.renderRecent();
@@ -372,7 +332,7 @@
             this.stateSelect.appendChild(opt);
           });
 
-        this.eyebrowEl.textContent = `Search courses across ${licenseTypes.length} professions`;
+        this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
         if (this.context.stateAbbv)
           this.stateSelect.value = this.context.stateAbbv;
@@ -391,7 +351,7 @@
       const selected = this.stateSelect.options[this.stateSelect.selectedIndex];
       this.selectMeasureEl.textContent = selected ? selected.textContent : "";
       const textWidth = this.selectMeasureEl.offsetWidth;
-      const CHROME_WIDTH = 14 + 34 + 2; // padding-left + padding-right (incl. arrow) + border
+      const CHROME_WIDTH = 38 + 34 + 2; // pin-icon padding-left + padding-right (incl. arrow) + border
       this.stateSelect.style.width = `${textWidth + CHROME_WIDTH}px`;
     }
 

@@ -2,10 +2,12 @@
 /**
  * Plugin Name: Western Schools Course Search
  * Description: Free-text, typo-tolerant course search with AI-assisted
- *              semantic suggestions. Talks directly to a self-hosted
- *              Meilisearch instance via wp_remote_* calls — no separate
- *              application server required.
- * Version:     3.1.0
+ *              semantic suggestions. No external search service and no
+ *              separate application server — catalog data lives in two
+ *              plugin-owned tables, and semantic embeddings are computed
+ *              in the browser (visitor's for queries, admin's for the
+ *              catalog), not on the server.
+ * Version:     4.0.0
  * Author:      Siful Siddiki
  */
 
@@ -13,122 +15,121 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit; // No direct access.
 }
 
-/**
- * Meilisearch instance backing keyword search + AI semantic matching.
- * Must be reachable from wherever WordPress executes — point this at
- * wherever Meilisearch is actually hosted before activating on a real site.
- * Meilisearch's own huggingFace embedder computes all embeddings (both at
- * index time and query time, via the scratch-document trick in
- * ws_get_query_vector()), so no separate application server is needed here.
- */
-if ( ! defined( 'WS_MEILI_HOST' ) ) {
-	define( 'WS_MEILI_HOST', 'http://localhost:7700' );
-}
-if ( ! defined( 'WS_MEILI_API_KEY' ) ) {
-	define( 'WS_MEILI_API_KEY', '' );
-}
 if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
 	define( 'WS_MARKETING_API_BASE', 'https://test-api-ms.westernschools.com' );
 }
 
-/**
- * On hosts where wp-config.php isn't editable (managed/staging hosting with
- * WP Admin-only access), the constants above can't be set. Settings ->
- * WS Course Search stores the same two values as options instead; an option
- * wins when set, otherwise these fall back to the constants so a
- * wp-config.php-based install keeps working unchanged.
- */
-function ws_get_meili_host() {
-	$option = get_option( 'ws_meili_host' );
-	return $option ? $option : WS_MEILI_HOST;
+const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.
+// Course catalogs don't change minute-to-minute, so this can be generous —
+// a short TTL just means more real users hit the several-second cold-cache
+// cost (the Marketing API's own first-page latency) for no real freshness
+// benefit. 6h keeps same-day catalog changes visible while making that
+// cost rare in practice instead of a recurring "switch state, wait" hit.
+const WS_INDEX_TTL = 6 * 60 * 60; // seconds
+
+// ---------------------------------------------------------------------------
+// DB schema — replaces the Meilisearch-hosted index entirely. Catalog data
+// (~150 state+profession combos, ~370 products each) is too large and too
+// frequently re-read to live in wp_options-backed transients on a host with
+// no persistent external object cache, so it gets real tables instead.
+// ---------------------------------------------------------------------------
+
+function ws_catalog_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'ws_catalog';
 }
-function ws_get_meili_api_key() {
-	$option = get_option( 'ws_meili_api_key' );
-	return $option ? $option : WS_MEILI_API_KEY;
+
+function ws_embeddings_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'ws_embeddings';
 }
+
+// One row per (product_id, state_abbv, license_type_id) — a product can
+// legitimately repeat across state/license combos with different
+// pricing/approval, so the composite key matters (same reasoning the old
+// Meilisearch doc-id scheme used, see ws_meili_doc_id() in git history).
+// Token fields are space-joined TEXT, re-split on read — cheap, and avoids
+// a second serialization format alongside the flat columns.
+//
+// Embeddings live in a *separate* table, keyed by product_id alone: a
+// course's embedding text (name + tags) doesn't vary by state or license,
+// so keying it per-combo here would mean redundantly recomputing the same
+// embedding for every state a widely-sold course appears in.
+function ws_search_create_tables() {
+	global $wpdb;
+	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+	$charset_collate  = $wpdb->get_charset_collate();
+	$catalog_table    = ws_catalog_table();
+	$embeddings_table = ws_embeddings_table();
+
+	dbDelta(
+		"CREATE TABLE {$catalog_table} (
+			product_id VARCHAR(64) NOT NULL,
+			state_abbv VARCHAR(8) NOT NULL,
+			license_type_id BIGINT UNSIGNED NOT NULL,
+			item_id VARCHAR(64) NULL,
+			name TEXT NOT NULL,
+			seo_name TEXT NULL,
+			delivery_method VARCHAR(64) NULL,
+			price_all DECIMAL(10,2) NULL,
+			instructor VARCHAR(255) NULL,
+			license_type VARCHAR(128) NULL,
+			credit_hours DECIMAL(6,2) NULL,
+			is_mandatory TINYINT(1) NULL,
+			credit_type VARCHAR(64) NULL,
+			title_tokens TEXT NULL,
+			description_tokens LONGTEXT NULL,
+			cached_at DATETIME NOT NULL,
+			PRIMARY KEY  (product_id, state_abbv, license_type_id),
+			KEY state_license (state_abbv, license_type_id)
+		) {$charset_collate};"
+	);
+
+	dbDelta(
+		"CREATE TABLE {$embeddings_table} (
+			product_id VARCHAR(64) NOT NULL,
+			vector MEDIUMBLOB NOT NULL,
+			source_hash VARCHAR(32) NOT NULL,
+			embedded_at DATETIME NOT NULL,
+			PRIMARY KEY  (product_id)
+		) {$charset_collate};"
+	);
+}
+
+function ws_search_activate() {
+	ws_search_create_tables();
+}
+register_activation_hook( __FILE__, 'ws_search_activate' );
+
+function ws_search_deactivate() {
+	wp_clear_scheduled_hook( 'ws_search_prewarm_tick' );
+}
+register_deactivation_hook( __FILE__, 'ws_search_deactivate' );
 
 // ---------------------------------------------------------------------------
 // Settings page (Settings -> WS Course Search)
 // ---------------------------------------------------------------------------
 
-function ws_meili_add_settings_page() {
+function ws_search_add_settings_page() {
 	add_options_page(
 		'WS Course Search',
 		'WS Course Search',
 		'manage_options',
 		'ws-course-search',
-		'ws_meili_render_settings_page'
+		'ws_search_render_settings_page'
 	);
 }
-add_action( 'admin_menu', 'ws_meili_add_settings_page' );
+add_action( 'admin_menu', 'ws_search_add_settings_page' );
 
-function ws_meili_register_settings() {
-	register_setting( 'ws_course_search', 'ws_meili_host', array( 'sanitize_callback' => 'esc_url_raw' ) );
-	register_setting( 'ws_course_search', 'ws_meili_api_key', array( 'sanitize_callback' => 'sanitize_text_field' ) );
-
-	add_settings_section(
-		'ws_meili_main',
-		'Meilisearch connection',
-		function () {
-			echo '<p>Overrides the ' . esc_html( 'WS_MEILI_HOST' ) . ' / ' . esc_html( 'WS_MEILI_API_KEY' ) .
-				' constants below, for hosts where wp-config.php isn\'t editable. Leave blank to use those instead.</p>';
-		},
-		'ws-course-search'
-	);
-
-	add_settings_field(
-		'ws_meili_host',
-		'Meilisearch host',
-		function () {
-			printf(
-				'<input type="url" name="ws_meili_host" value="%s" class="regular-text" placeholder="%s" />',
-				esc_attr( get_option( 'ws_meili_host' ) ),
-				esc_attr( WS_MEILI_HOST )
-			);
-		},
-		'ws-course-search',
-		'ws_meili_main'
-	);
-
-	add_settings_field(
-		'ws_meili_api_key',
-		'Meilisearch API key',
-		function () {
-			printf(
-				'<input type="password" name="ws_meili_api_key" value="%s" class="regular-text" autocomplete="off" />',
-				esc_attr( get_option( 'ws_meili_api_key' ) )
-			);
-		},
-		'ws-course-search',
-		'ws_meili_main'
-	);
-}
-add_action( 'admin_init', 'ws_meili_register_settings' );
-
-function ws_meili_render_settings_page() {
+function ws_search_render_settings_page() {
 	?>
 	<div class="wrap">
 		<h1>WS Course Search</h1>
-		<form action="options.php" method="post">
-			<?php
-			settings_fields( 'ws_course_search' );
-			do_settings_sections( 'ws-course-search' );
-			submit_button();
-			?>
-		</form>
+		<p>Keyword and typo-tolerant search run automatically — no configuration needed.</p>
 	</div>
 	<?php
 }
-
-const WS_CATALOG_PAGE_SIZE   = 100;  // Marketing API's hard per-request cap.
-// Course catalogs don't change minute-to-minute, so this can be generous —
-// a short TTL just means more real users hit the several-second cold-index
-// cost (the Marketing API's own first-page latency) for no real freshness
-// benefit. 6h keeps same-day catalog changes visible while making that
-// cost rare in practice instead of a recurring "switch state, wait" hit.
-const WS_INDEX_TTL           = 6 * 60 * 60;
-const WS_CANDIDATE_POOL_SIZE = 50;   // over-fetched, then relevance-filtered + deduped.
-const WS_RELEVANCE_THRESHOLD = 0.4;  // raw cosine cutoff — see ws_search_handle_search().
 
 // ---------------------------------------------------------------------------
 // Asset registration
@@ -139,13 +140,13 @@ function ws_search_enqueue_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'3.0.0'
+		'4.0.0'
 	);
 	wp_enqueue_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'3.0.0',
+		'4.0.0',
 		true
 	);
 	wp_localize_script(
@@ -181,105 +182,7 @@ function ws_search_shortcode( $atts ) {
 add_shortcode( 'ws_course_search', 'ws_search_shortcode' );
 
 // ---------------------------------------------------------------------------
-// Meilisearch REST helpers
-// ---------------------------------------------------------------------------
-
-function ws_meili_request( $method, $path, $body = null, $blocking = true ) {
-	$args = array(
-		'method'   => $method,
-		'timeout'  => 20,
-		'blocking' => $blocking,
-		'headers'  => array(
-			'Authorization' => 'Bearer ' . ws_get_meili_api_key(),
-			'Content-Type'  => 'application/json',
-		),
-	);
-	if ( null !== $body ) {
-		$args['body'] = wp_json_encode( $body );
-	}
-
-	$response = wp_remote_request( trailingslashit( ws_get_meili_host() ) . $path, $args );
-
-	if ( ! $blocking ) {
-		return array();
-	}
-	if ( is_wp_error( $response ) ) {
-		return array( 'error' => $response->get_error_message() );
-	}
-	$decoded = json_decode( wp_remote_retrieve_body( $response ), true );
-	return is_array( $decoded ) ? $decoded : array();
-}
-
-// Meilisearch's addDocuments/deleteDocument etc. only return once a task is
-// *enqueued*, not once it's actually applied — waiting for the task avoids
-// the race that caused intermittent "0 results" on a cold index during
-// development (same fix as .waitTask() in the JS client).
-function ws_meili_wait_task( $task_uid ) {
-	$deadline = time() + 20;
-	while ( time() < $deadline ) {
-		$task = ws_meili_request( 'GET', "tasks/{$task_uid}" );
-		if ( isset( $task['status'] ) && in_array( $task['status'], array( 'succeeded', 'failed' ), true ) ) {
-			return $task;
-		}
-		usleep( 200000 ); // 200ms
-	}
-	return array( 'status' => 'timeout' );
-}
-
-// Raw cosine similarity — NOT Meilisearch's own _rankingScore, which is
-// normalized relative to the current result set and isn't a reliable
-// absolute relevance signal (verified: pure gibberish scored 0.61+ on that
-// scale, indistinguishable from genuine matches). These vectors aren't
-// guaranteed pre-normalized, so this uses the full formula rather than a
-// bare dot product.
-function ws_cosine_similarity( $a, $b ) {
-	$dot = 0.0;
-	$na  = 0.0;
-	$nb  = 0.0;
-	$len = count( $a );
-	for ( $i = 0; $i < $len; $i++ ) {
-		$dot += $a[ $i ] * $b[ $i ];
-		$na  += $a[ $i ] * $a[ $i ];
-		$nb  += $b[ $i ] * $b[ $i ];
-	}
-	if ( 0.0 === $na || 0.0 === $nb ) {
-		return 0.0;
-	}
-	return $dot / ( sqrt( $na ) * sqrt( $nb ) );
-}
-
-// Meilisearch has no dedicated "embed this text" endpoint, so a query's own
-// vector is obtained by adding a throwaway document containing just the
-// query text, letting Meilisearch's huggingFace embedder compute its
-// vector, reading it back, then deleting the document.
-function ws_get_query_vector( $query ) {
-	$scratch_id = 'scratch_' . md5( $query . wp_generate_password( 8, false ) );
-	$doc        = array(
-		'id'            => $scratch_id,
-		'name'          => $query,
-		'instructor'    => '',
-		'tags'          => array(),
-		'description'   => '',
-		'stateAbbv'     => 'ZZ',
-		'licenseTypeId' => 0,
-	);
-
-	$add_result = ws_meili_request( 'POST', 'indexes/courses/documents?primaryKey=id', array( $doc ) );
-	if ( isset( $add_result['taskUid'] ) ) {
-		ws_meili_wait_task( $add_result['taskUid'] );
-	}
-
-	$fetched = ws_meili_request( 'GET', "indexes/courses/documents/{$scratch_id}?retrieveVectors=true" );
-	$vector  = $fetched['_vectors']['default']['embeddings'][0] ?? null;
-
-	// Fire-and-forget cleanup — don't block the search response on it.
-	ws_meili_request( 'DELETE', "indexes/courses/documents/{$scratch_id}", null, false );
-
-	return $vector;
-}
-
-// ---------------------------------------------------------------------------
-// Marketing API + indexing
+// Marketing API
 // ---------------------------------------------------------------------------
 
 function ws_fetch_json( $url ) {
@@ -357,69 +260,161 @@ function ws_fetch_all_products( $state_abbv, $license_type_id ) {
 	return $products;
 }
 
-// A product can legitimately appear under multiple states/professions with
-// different pricing/approval per combination, so the Meilisearch primary
-// key includes state+license — keying by productId alone would let a later
-// state's indexing pass silently overwrite an earlier state's data.
-function ws_meili_doc_id( $product, $state_abbv, $license_type_id ) {
-	return $product['productId'] . '_' . $state_abbv . '_' . $license_type_id;
+// ---------------------------------------------------------------------------
+// Typo-tolerant keyword search — ported from this project's own Node
+// prototype (server.js), itself ported from an earlier pre-Meilisearch
+// commit (30d0559) in this same repo's history. Typo tolerance is scoped
+// to title/instructor/tag fields, not full descriptions — fuzzy-matching
+// every word in a description caused false-positive noise (a misspelled
+// query matching dozens of courses that merely mention the correct word
+// in passing, verified during that original tuning pass). Descriptions
+// still get literal substring matching, just not fuzzy.
+// ---------------------------------------------------------------------------
+
+function ws_tokenize( $text ) {
+	$text  = strtolower( (string) $text );
+	$parts = preg_split( '/[^a-z0-9]+/', $text, -1, PREG_SPLIT_NO_EMPTY );
+	return $parts ? $parts : array();
 }
 
-function ws_build_documents( $products, $state_abbv, $license_type_id ) {
-	$documents = array();
+function ws_build_title_text( $product ) {
+	$offering   = ! empty( $product['offerings'][0] ) ? $product['offerings'][0] : array();
+	$tag_values = array_map(
+		function ( $tag ) {
+			return $tag['tagValue'];
+		},
+		$offering['tags'] ?? array()
+	);
+	return implode(
+		' ',
+		array_filter(
+			array( $product['name'] ?? '', $product['instructor'] ?? '', implode( ' ', $tag_values ) )
+		)
+	);
+}
 
-	foreach ( $products as $product ) {
-		// A handful of catalog entries in the test API are broken
-		// placeholders (name/description/seoName all null or empty) — not
-		// a real, clickable course, so exclude them.
-		if ( empty( $product['name'] ) ) {
+function ws_build_description_text( $product ) {
+	$offering = ! empty( $product['offerings'][0] ) ? $product['offerings'][0] : array();
+	return wp_strip_all_tags( (string) ( $offering['description'] ?? '' ) );
+}
+
+// Scales allowed typos with query-token length, matching common
+// typo-tolerant search conventions (Algolia/Elasticsearch use similar bands).
+function ws_allowed_typos( $len ) {
+	if ( $len <= 4 ) {
+		return 0;
+	}
+	if ( $len <= 8 ) {
+		return 1;
+	}
+	return 2;
+}
+
+function ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens ) {
+	foreach ( $query_tokens as $qt ) {
+		$in_title = false;
+		foreach ( $title_tokens as $t ) {
+			// strpos( $t, $qt ) only — NOT the reverse direction. The
+			// reverse means any short common word (e.g. "a") is trivially
+			// a substring of almost any query, matching nearly everything.
+			if ( false !== strpos( $t, $qt ) ) {
+				$in_title = true;
+				break;
+			}
+			$max_dist = ws_allowed_typos( strlen( $qt ) );
+			if ( $max_dist > 0 && levenshtein( $qt, $t ) <= $max_dist ) {
+				$in_title = true;
+				break;
+			}
+		}
+		if ( $in_title ) {
 			continue;
 		}
-
-		$offering = ! empty( $product['offerings'][0] ) ? $product['offerings'][0] : array();
-		$tags     = array_map(
-			function ( $tag ) {
-				return $tag['tagValue'];
-			},
-			$offering['tags'] ?? array()
-		);
-
-		$documents[] = array(
-			'id'            => ws_meili_doc_id( $product, $state_abbv, $license_type_id ),
-			'name'          => $product['name'],
-			'instructor'    => $product['instructor'] ?? '',
-			'tags'          => $tags,
-			'description'   => mb_substr( wp_strip_all_tags( (string) ( $offering['description'] ?? '' ) ), 0, 2000 ),
-			'stateAbbv'     => $state_abbv,
-			'licenseTypeId' => $license_type_id,
-			'product'       => $product,
-		);
+		$in_description = false;
+		foreach ( $description_tokens as $t ) {
+			if ( false !== strpos( $t, $qt ) ) {
+				$in_description = true;
+				break;
+			}
+		}
+		if ( ! $in_description ) {
+			return false;
+		}
 	}
-
-	return $documents;
+	return true;
 }
 
-// No embeddings are computed here — Meilisearch's huggingFace embedder
-// generates them automatically from each document's name+tags (per the
-// index's documentTemplate) as part of addDocuments below.
-function ws_do_index( $state_abbv, $license_type_id ) {
-	$products  = ws_fetch_all_products( $state_abbv, $license_type_id );
-	$documents = ws_build_documents( $products, $state_abbv, $license_type_id );
+// ---------------------------------------------------------------------------
+// Catalog loading — replaces Meilisearch document indexing.
+// ---------------------------------------------------------------------------
 
-	if ( empty( $documents ) ) {
+const WS_EMPTY_CATALOG_MARKER = '__empty__';
+
+// A handful of catalog entries in the test API are broken placeholders
+// (name/description/seoName all null or empty) — not a real, clickable
+// course, so they're excluded before ever reaching the table.
+function ws_do_index( $state_abbv, $license_type_id ) {
+	global $wpdb;
+	$table    = ws_catalog_table();
+	$now      = current_time( 'mysql' );
+	$products = array_values(
+		array_filter(
+			ws_fetch_all_products( $state_abbv, $license_type_id ),
+			function ( $p ) {
+				return ! empty( $p['name'] );
+			}
+		)
+	);
+
+	if ( empty( $products ) ) {
+		// Sentinel row so freshness has something to check the timestamp
+		// of — an empty catalog is a legitimate, common result (many
+		// license types have zero courses in a given state) and shouldn't
+		// force a Marketing API round-trip on every single search.
+		$wpdb->replace(
+			$table,
+			array(
+				'product_id'      => WS_EMPTY_CATALOG_MARKER,
+				'state_abbv'      => $state_abbv,
+				'license_type_id' => $license_type_id,
+				'name'            => '',
+				'cached_at'       => $now,
+			)
+		);
 		return;
 	}
 
-	$result = ws_meili_request( 'POST', 'indexes/courses/documents?primaryKey=id', $documents );
-	if ( isset( $result['taskUid'] ) ) {
-		ws_meili_wait_task( $result['taskUid'] );
+	foreach ( $products as $product ) {
+		$offering = ! empty( $product['offerings'][0] ) ? $product['offerings'][0] : array();
+
+		$wpdb->replace(
+			$table,
+			array(
+				'product_id'         => (string) $product['productId'],
+				'state_abbv'         => $state_abbv,
+				'license_type_id'    => $license_type_id,
+				'item_id'            => isset( $product['itemId'] ) ? (string) $product['itemId'] : '',
+				'name'               => $product['name'],
+				'seo_name'           => $product['seoName'] ?? '',
+				'delivery_method'    => $product['deliveryMethod'] ?? '',
+				'price_all'          => isset( $product['priceAll'] ) ? (float) $product['priceAll'] : null,
+				'instructor'         => $product['instructor'] ?? '',
+				'license_type'       => $offering['licenseType'] ?? '',
+				'credit_hours'       => isset( $offering['creditHours'] ) ? (float) $offering['creditHours'] : null,
+				'is_mandatory'       => ! empty( $offering['isMandatory'] ) ? 1 : 0,
+				'credit_type'        => $offering['creditType'] ?? '',
+				'title_tokens'       => implode( ' ', ws_tokenize( ws_build_title_text( $product ) ) ),
+				'description_tokens' => implode( ' ', ws_tokenize( ws_build_description_text( $product ) ) ),
+				'cached_at'          => $now,
+			)
+		);
 	}
 }
 
 // Called both when a state is first selected (fire-and-forget prefetch via
 // ws_search_handle_warm) and from an actual search — a short-TTL transient
 // lock keeps a second concurrent request for the same combo from
-// redundantly re-fetching and re-embedding the same catalog.
+// redundantly re-fetching the same catalog.
 function ws_ensure_indexed( $state_abbv, $license_type_id ) {
 	$key = "{$state_abbv}_{$license_type_id}";
 
@@ -436,6 +431,31 @@ function ws_ensure_indexed( $state_abbv, $license_type_id ) {
 	ws_do_index( $state_abbv, $license_type_id );
 	delete_transient( "ws_indexing_lock_{$key}" );
 	set_transient( "ws_indexed_{$key}", 1, WS_INDEX_TTL );
+}
+
+// Reshapes a ws_catalog row back into the product shape the frontend
+// already expects (search-widget.js's defaultProductUrl/formatMeta/
+// creditBadge) — unchanged from the Meilisearch days, so the JS widget
+// needed no changes for keyword search to work against this new backend.
+function ws_row_to_product( $row, $match_type ) {
+	return array(
+		'productId'      => $row['product_id'],
+		'itemId'         => $row['item_id'],
+		'name'           => $row['name'],
+		'seoName'        => $row['seo_name'],
+		'deliveryMethod' => $row['delivery_method'],
+		'priceAll'       => null !== $row['price_all'] ? (float) $row['price_all'] : null,
+		'instructor'     => $row['instructor'],
+		'offerings'      => array(
+			array(
+				'licenseType' => $row['license_type'],
+				'creditHours' => null !== $row['credit_hours'] ? (float) $row['credit_hours'] : null,
+				'isMandatory' => (bool) $row['is_mandatory'],
+				'creditType'  => $row['credit_type'],
+			),
+		),
+		'matchType'      => $match_type,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +496,7 @@ add_action( 'wp_ajax_ws_search_warm', 'ws_search_handle_warm' );
 add_action( 'wp_ajax_nopriv_ws_search_warm', 'ws_search_handle_warm' );
 
 function ws_search_handle_search() {
+	global $wpdb;
 	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
 	$q          = isset( $_GET['q'] ) ? trim( sanitize_text_field( wp_unslash( $_GET['q'] ) ) ) : '';
 	$limit      = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 8;
@@ -484,10 +505,12 @@ function ws_search_handle_search() {
 		wp_send_json( array( 'error' => 'state is required' ), 400 );
 	}
 	if ( strlen( $q ) < 2 ) {
-		wp_send_json( array(
-			'products' => array(),
-			'total'    => 0,
-		) );
+		wp_send_json(
+			array(
+				'products' => array(),
+				'total'    => 0,
+			)
+		);
 	}
 
 	set_time_limit( 60 );
@@ -495,92 +518,43 @@ function ws_search_handle_search() {
 		ws_ensure_indexed( $state_abbv, $license_type_id );
 	}
 
-	$filter = 'stateAbbv = "' . addslashes( $state_abbv ) . '"';
-
-	// Two separate passes rather than one hybrid query — a blended hybrid
-	// score dilutes typo matches, since a misspelled query's own embedding
-	// is a poor match even for the *correct* course.
-
-	// Pass 1: pure keyword/typo search. Meilisearch's own native engine
-	// handles this reliably (typo tolerance included) — no relevance
-	// gating needed, unlike the semantic pass below.
-	$keyword_result = ws_meili_request(
-		'POST',
-		'indexes/courses/search',
-		array(
-			'q'                    => $q,
-			'filter'               => $filter,
-			'limit'                => WS_CANDIDATE_POOL_SIZE,
-			'attributesToRetrieve' => array( 'product' ),
-		)
+	$query_tokens = ws_tokenize( $q );
+	$table        = ws_catalog_table();
+	$rows         = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT * FROM {$table} WHERE state_abbv = %s AND product_id != %s",
+			$state_abbv,
+			WS_EMPTY_CATALOG_MARKER
+		),
+		ARRAY_A
 	);
 
 	$seen     = array();
 	$products = array();
-	foreach ( $keyword_result['hits'] ?? array() as $hit ) {
-		$id = $hit['product']['productId'];
-		if ( isset( $seen[ $id ] ) ) {
+	foreach ( $rows as $row ) {
+		if ( isset( $seen[ $row['product_id'] ] ) ) {
 			continue;
 		}
-		$seen[ $id ]           = true;
-		$product               = $hit['product'];
-		$product['matchType']  = 'keyword';
-		$products[]            = $product;
-	}
-
-	// Pass 2: semantic rescue for queries with no (or weak) keyword overlap,
-	// e.g. "back pain course" -> "Low Back Pain" despite "course" not
-	// appearing in any title. Gated by raw cosine similarity computed from
-	// the retrieved stored vectors — NOT Meilisearch's hybrid
-	// _rankingScore (see ws_cosine_similarity() above for why).
-	$query_vector       = ws_get_query_vector( $q );
-	$semantic_additions = 0;
-
-	if ( $query_vector ) {
-		$semantic_result = ws_meili_request(
-			'POST',
-			'indexes/courses/search',
-			array(
-				'q'                    => $q,
-				'hybrid'               => array(
-					'embedder'      => 'default',
-					'semanticRatio' => 1,
-				),
-				'filter'               => $filter,
-				'limit'                => WS_CANDIDATE_POOL_SIZE,
-				'attributesToRetrieve' => array( 'product' ),
-				'retrieveVectors'      => true,
-			)
-		);
-
-		foreach ( $semantic_result['hits'] ?? array() as $hit ) {
-			$id = $hit['product']['productId'];
-			if ( isset( $seen[ $id ] ) ) {
-				continue;
-			}
-			$doc_vector = $hit['_vectors']['default']['embeddings'][0] ?? null;
-			$cosine     = $doc_vector ? ws_cosine_similarity( $query_vector, $doc_vector ) : 0;
-			if ( $cosine < WS_RELEVANCE_THRESHOLD ) {
-				continue;
-			}
-			$seen[ $id ]          = true;
-			$product              = $hit['product'];
-			$product['matchType'] = 'semantic';
-			$products[]           = $product;
-			$semantic_additions++;
+		$title_tokens       = $row['title_tokens'] ? explode( ' ', $row['title_tokens'] ) : array();
+		$description_tokens = $row['description_tokens'] ? explode( ' ', $row['description_tokens'] ) : array();
+		if ( ! ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens ) ) {
+			continue;
 		}
+		$seen[ $row['product_id'] ] = true;
+		$products[]                 = ws_row_to_product( $row, 'keyword' );
 	}
 
-	// estimatedTotalHits is meaningful for the plain-keyword pass (unlike
-	// the hybrid/vector case) — using count($products) alone would
-	// silently cap broad queries at WS_CANDIDATE_POOL_SIZE instead of
-	// reporting how many actually match.
-	$total = ( $keyword_result['estimatedTotalHits'] ?? count( $products ) ) + $semantic_additions;
+	usort(
+		$products,
+		function ( $a, $b ) {
+			return strcmp( $a['name'], $b['name'] );
+		}
+	);
 
 	wp_send_json(
 		array(
 			'products' => array_slice( $products, 0, $limit ),
-			'total'    => $total,
+			'total'    => count( $products ),
 		)
 	);
 }

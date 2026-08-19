@@ -348,6 +348,53 @@ async function handleWarm(res, query) {
   }
 }
 
+// The on-demand "warm on state select" above still means the *first ever*
+// visitor to a given state, in a freshly-started process, pays the full
+// several-second Marketing API + embedding cost. Proactively warming every
+// state in the background at startup (and again each TTL window) means
+// that by the time a real visitor picks a state, it's almost always
+// already cached — this is what actually makes the cold-start cost
+// disappear in practice, not further optimizing the on-demand path itself.
+const WARM_ALL_CONCURRENCY = 5; // bounded so this doesn't hammer the Marketing API
+async function warmAllStatesInBackground() {
+  try {
+    const [{ data: states }, licenseTypeIds] = await Promise.all([
+      fetchJson(`${API_BASE}/marketing/states`),
+      getAllLicenseTypeIds(),
+    ]);
+
+    const combos = [];
+    for (const s of states) {
+      for (const id of licenseTypeIds) combos.push([s.stateAbbv, id]);
+    }
+
+    let nextIndex = 0;
+    let completed = 0;
+    async function worker() {
+      while (nextIndex < combos.length) {
+        const [stateAbbv, licenseTypeId] = combos[nextIndex++];
+        try {
+          await ensureCatalogReady(stateAbbv, licenseTypeId);
+        } catch (err) {
+          console.error(
+            `Background pre-warm failed for ${stateAbbv}/${licenseTypeId}:`,
+            err.message
+          );
+        }
+        completed++;
+      }
+    }
+
+    console.log(`Background pre-warm starting: ${combos.length} state+profession combos...`);
+    await Promise.all(
+      Array.from({ length: WARM_ALL_CONCURRENCY }, () => worker())
+    );
+    console.log(`Background pre-warm complete: ${completed}/${combos.length} combos cached.`);
+  } catch (err) {
+    console.error("Background pre-warm failed to start:", err.message);
+  }
+}
+
 async function handleSearch(res, query) {
   const stateAbbv = query.get("state");
   const q = (query.get("q") || "").trim();
@@ -470,4 +517,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Search prototype running at http://localhost:${PORT}`);
+  warmAllStatesInBackground();
+  setInterval(warmAllStatesInBackground, CATALOG_TTL_MS);
 });

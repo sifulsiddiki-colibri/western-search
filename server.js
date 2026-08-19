@@ -12,77 +12,16 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
-const { Meilisearch } = require("meilisearch");
 
 const PORT = process.env.PORT || 8080;
 const API_BASE = "https://test-api-ms.westernschools.com";
 const CATALOG_PAGE_SIZE = 100; // the API's hard per-request cap
 // Course catalogs don't change minute-to-minute, so this can be generous —
-// a short TTL just means more real users hit the several-second cold-index
+// a short TTL just means more real users hit the several-second cold-cache
 // cost (the Marketing API's own first-page latency) for no real freshness
 // benefit. 6h keeps same-day catalog changes visible while making that
 // cost rare in practice instead of a recurring "switch state, wait" hit.
-const INDEX_TTL_MS = 6 * 60 * 60 * 1000;
-const CANDIDATE_POOL_SIZE = 50; // over-fetched, then relevance-filtered + deduped
-const RELEVANCE_THRESHOLD = 0.4; // raw cosine cutoff — see handleSearch
-
-function cosineSim(a, b) {
-  // Both vectors are already L2-normalized (Xenova's `normalize: true`),
-  // so the dot product IS the cosine similarity.
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot;
-}
-
-// Search runs on a self-hosted Meilisearch instance (community edition,
-// free) instead of the earlier Mantle-LLM-judges-relevance approach —
-// validated to be both faster (3-16ms vs 1.6-8s) and, once tuned, at least
-// as accurate. Query embeddings are still computed locally (Xenova,
-// unchanged from the original semantic-search implementation); Meilisearch
-// just does the storage/ranking instead of a hand-rolled cosine-similarity
-// loop and hand-rolled Levenshtein typo tolerance.
-//
-// Keyword and semantic matching run as two separate Meilisearch queries
-// (see handleSearch) rather than one hybrid call — a blended hybrid score
-// dilutes typo matches, since a misspelled query's own embedding is a
-// poor match even for the *correct* course.
-const MEILI_HOST = process.env.MEILI_HOST || "http://localhost:7700";
-const MEILI_API_KEY = process.env.MEILI_API_KEY || "";
-const meiliClient = new Meilisearch({ host: MEILI_HOST, apiKey: MEILI_API_KEY });
-const meiliIndex = meiliClient.index("courses");
-// Index settings (embedders, filterable/searchable attributes) are
-// configured once, out-of-band, with a privileged key — see README. The
-// runtime key only needs `search` + `documents.add`, so this process never
-// calls updateSettings() itself; keeping that permission out of the
-// running app's key is the point, not an oversight.
-
-let embedderPromise = null;
-function getEmbedder() {
-  if (!embedderPromise) {
-    const { pipeline } = require("@xenova/transformers");
-    embedderPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-  }
-  return embedderPromise;
-}
-async function embed(text) {
-  const extractor = await getEmbedder();
-  const output = await extractor(text, { pooling: "mean", normalize: true });
-  return Array.from(output.data);
-}
-
-// One pipeline call for many texts, rather than one call per text —
-// measured ~30% faster for a ~370-item catalog. output.dims is
-// [texts.length, embeddingDim]; output.data is the flattened result.
-async function embedBatch(texts) {
-  const extractor = await getEmbedder();
-  const output = await extractor(texts, { pooling: "mean", normalize: true });
-  const [count, dim] = output.dims;
-  const vectors = [];
-  for (let i = 0; i < count; i++) {
-    vectors.push(Array.from(output.data.slice(i * dim, (i + 1) * dim)));
-  }
-  return vectors;
-}
+const CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -132,28 +71,42 @@ async function handleLookups(res) {
   }
 }
 
+function productsPageUrl(stateAbbv, licenseTypeId, offset) {
+  const apiUrl = new URL(`${API_BASE}/marketing/products/withfilters`);
+  apiUrl.searchParams.set("stateAbbvs", stateAbbv);
+  apiUrl.searchParams.set("licenseTypeIds", licenseTypeId);
+  apiUrl.searchParams.set("offset", String(offset));
+  apiUrl.searchParams.set("limit", String(CATALOG_PAGE_SIZE));
+  return apiUrl.toString();
+}
+
+// The first page's latency dominates (the Marketing API's own ~3.8s cold
+// first-response cost) — once it tells us the total count, the remaining
+// pages are independent requests and don't need to wait on each other.
 async function fetchAllProducts(stateAbbv, licenseTypeId) {
-  const products = [];
-  let offset = 0;
-  while (true) {
-    const apiUrl = new URL(`${API_BASE}/marketing/products/withfilters`);
-    apiUrl.searchParams.set("stateAbbvs", stateAbbv);
-    apiUrl.searchParams.set("licenseTypeIds", licenseTypeId);
-    apiUrl.searchParams.set("offset", String(offset));
-    apiUrl.searchParams.set("limit", String(CATALOG_PAGE_SIZE));
+  const first = await fetchJson(productsPageUrl(stateAbbv, licenseTypeId, 0));
+  const products = [...(first.data.products || [])];
 
-    const { data, headers } = await fetchJson(apiUrl.toString());
-    products.push(...(data.products || []));
-
-    let pagination;
-    try {
-      pagination = JSON.parse(headers["x-pagination"]);
-    } catch (e) {
-      break;
-    }
-    if (!pagination.hasMore || pagination.nextOffset == null) break;
-    offset = pagination.nextOffset;
+  let pagination;
+  try {
+    pagination = JSON.parse(first.headers["x-pagination"]);
+  } catch (e) {
+    return products;
   }
+
+  const total = pagination.total ?? products.length;
+  const remainingOffsets = [];
+  for (let offset = CATALOG_PAGE_SIZE; offset < total; offset += CATALOG_PAGE_SIZE) {
+    remainingOffsets.push(offset);
+  }
+
+  const pages = await Promise.all(
+    remainingOffsets.map((offset) =>
+      fetchJson(productsPageUrl(stateAbbv, licenseTypeId, offset))
+    )
+  );
+  for (const page of pages) products.push(...(page.data.products || []));
+
   return products;
 }
 
@@ -161,43 +114,134 @@ function stripHtml(html) {
   return (html || "").replace(/<[^>]*>/g, " ");
 }
 
-function embeddingText(product) {
+function tokenize(text) {
+  return (text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// Typo tolerance is scoped to short, curated fields (title/instructor/tags)
+// — fuzzy-matching every word in a full description caused accidental
+// edit-distance collisions with unrelated courses (a misspelled query
+// matching dozens of courses that merely mention the correct word in
+// passing, verified during initial tuning). Descriptions still get literal
+// substring matching, just not fuzzy, to keep "match text buried in the
+// description" behavior without that noise.
+function buildSearchableTokens(product) {
   const offering = (product.offerings || [])[0] || {};
-  const tags = (offering.tags || []).map((t) => t.tagValue).join(", ");
-  return [product.name, tags].filter(Boolean).join(". ");
+  const tagValues = (offering.tags || []).map((t) => t.tagValue).join(" ");
+  const titleText = [product.name, product.instructor, tagValues]
+    .filter(Boolean)
+    .join(" ");
+  const descriptionText = stripHtml(offering.description);
+  return {
+    titleTokens: tokenize(titleText),
+    descriptionTokens: tokenize(descriptionText),
+  };
 }
 
-// A product can legitimately appear under multiple states/professions with
-// different pricing/approval per combination, so the Meilisearch primary
-// key includes state+license — keying by productId alone would let a
-// later state's indexing pass silently overwrite an earlier state's data.
-function meiliDocId(product, stateAbbv, licenseTypeId) {
-  return `${product.productId}_${stateAbbv}_${licenseTypeId}`;
+// Standard DP Levenshtein edit distance.
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  const al = a.length;
+  const bl = b.length;
+  if (al === 0) return bl;
+  if (bl === 0) return al;
+
+  let prev = new Array(bl + 1);
+  let curr = new Array(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+
+  for (let i = 1; i <= al; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[bl];
 }
 
-const indexedCombos = new Map(); // key: `${state}:${licenseTypeId}` -> last-indexed timestamp
-const inFlightIndexing = new Map(); // key -> in-progress indexing Promise
+// Scales allowed typos with query-token length, matching common
+// typo-tolerant search conventions (Algolia/Elasticsearch use similar bands).
+function allowedTypos(len) {
+  if (len <= 4) return 0;
+  if (len <= 8) return 1;
+  return 2;
+}
+
+function productMatchesQuery({ titleTokens, descriptionTokens }, queryTokens) {
+  return queryTokens.every((qt) => {
+    const inTitle = titleTokens.some((t) => {
+      // t.includes(qt) only — NOT qt.includes(t). The reverse direction
+      // means any short common word (e.g. "a") is trivially a substring
+      // of almost any query, matching nearly everything.
+      if (t.includes(qt)) return true;
+      const maxDist = allowedTypos(qt.length);
+      return maxDist > 0 && levenshtein(qt, t) <= maxDist;
+    });
+    if (inTitle) return true;
+    return descriptionTokens.some((t) => t.includes(qt));
+  });
+}
+
+// The widget/frontend only ever reads a handful of fields off the stored
+// product (see defaultProductUrl/formatMeta/creditBadge in
+// search-widget.js) — sending the Marketing API's full raw object back to
+// the browser instead (full HTML description, tracking-link-laden text,
+// unused metadata) roughly doubled every response's size for no
+// functional benefit.
+function trimProduct(product) {
+  const offering = (product.offerings || [])[0] || {};
+  return {
+    productId: product.productId,
+    itemId: product.itemId,
+    name: product.name,
+    seoName: product.seoName,
+    deliveryMethod: product.deliveryMethod,
+    priceAll: product.priceAll,
+    instructor: product.instructor,
+    offerings: [
+      {
+        licenseType: offering.licenseType,
+        creditHours: offering.creditHours,
+        isMandatory: offering.isMandatory,
+        creditType: offering.creditType,
+      },
+    ],
+  };
+}
+
+// In-process catalog cache — no external search service. Keyed by
+// state+profession since the same course can carry different pricing/
+// approval per combination. A few hundred products per combo is small
+// enough that scanning the whole cached list per search (rather than
+// building any kind of index structure) is still comfortably fast.
+const catalogCache = new Map(); // key: `${state}:${licenseTypeId}` -> { products, cachedAt }
+const inFlightLoads = new Map(); // key -> in-progress load Promise
 
 // Called both when a state is first selected (fire-and-forget prefetch)
-// and from an actual search — those can now race for the same state, so
-// a second concurrent call awaits the same in-progress work instead of
-// redundantly re-fetching and re-embedding the same catalog.
-async function ensureIndexed(stateAbbv, licenseTypeId) {
+// and from an actual search — those can race for the same state, so a
+// second concurrent call awaits the same in-progress work instead of
+// redundantly re-fetching the same catalog.
+async function ensureCatalogReady(stateAbbv, licenseTypeId) {
   const key = `${stateAbbv}:${licenseTypeId}`;
-  const lastIndexed = indexedCombos.get(key);
-  if (lastIndexed && Date.now() - lastIndexed < INDEX_TTL_MS) return;
+  const cached = catalogCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < CATALOG_TTL_MS) return;
 
-  const inFlight = inFlightIndexing.get(key);
+  const inFlight = inFlightLoads.get(key);
   if (inFlight) return inFlight;
 
-  const promise = doIndex(stateAbbv, licenseTypeId, key).finally(() => {
-    inFlightIndexing.delete(key);
+  const promise = loadCatalog(stateAbbv, licenseTypeId, key).finally(() => {
+    inFlightLoads.delete(key);
   });
-  inFlightIndexing.set(key, promise);
+  inFlightLoads.set(key, promise);
   return promise;
 }
 
-async function doIndex(stateAbbv, licenseTypeId, key) {
+async function loadCatalog(stateAbbv, licenseTypeId, key) {
   // A handful of catalog entries in the test API are broken placeholders
   // (name/description/seoName all null or empty) — not a real, clickable
   // course, so exclude them before they can surface as a search result.
@@ -205,43 +249,25 @@ async function doIndex(stateAbbv, licenseTypeId, key) {
     (p) => p.name
   );
 
-  // Batched (one pipeline call for all texts) rather than one embed() call
-  // per product — measured ~30% faster for a ~370-product catalog.
-  const vectors = products.length
-    ? await embedBatch(products.map(embeddingText))
-    : [];
-  const documents = products.map((product, i) => {
-    const offering = (product.offerings || [])[0] || {};
-    return {
-      id: meiliDocId(product, stateAbbv, licenseTypeId),
-      name: product.name,
-      instructor: product.instructor || "",
-      tags: (offering.tags || []).map((t) => t.tagValue),
-      description: stripHtml(offering.description).slice(0, 2000),
-      stateAbbv,
-      licenseTypeId,
-      product, // full raw product, returned as-is in search results
-      _vectors: { default: vectors[i] },
-    };
-  });
-
-  if (documents.length) {
-    // .waitTask() matters here — addDocuments() only returns once the task
-    // is *enqueued*, not once it's actually applied. Without waiting, a
-    // search immediately after this could run against an index that
-    // doesn't have these documents yet.
-    await meiliIndex.addDocuments(documents, { primaryKey: "id" }).waitTask();
+  for (const product of products) {
+    product.__tokens = buildSearchableTokens(product);
   }
-  indexedCombos.set(key, Date.now());
+
+  catalogCache.set(key, { products, cachedAt: Date.now() });
 }
 
-// Indexing a never-before-searched state costs several real seconds — not
+function getCachedCatalog(stateAbbv, licenseTypeId) {
+  const cached = catalogCache.get(`${stateAbbv}:${licenseTypeId}`);
+  return cached ? cached.products : [];
+}
+
+// Warming a never-before-searched state costs several real seconds — not
 // from anything in this code, but from the Marketing API itself: its
 // *first* response for a fresh state+profession query takes ~3.8s
 // (measured directly), vs ~200-350ms for subsequent paginated pages.
 // Nothing to optimize there since it's an external dependency, but the
 // cost doesn't have to land on the user's actual search — this endpoint
-// lets the widget kick off indexing the moment a state is picked, so it
+// lets the widget kick off warming the moment a state is picked, so it
 // usually finishes while the user is still typing their query instead of
 // blocking the search itself.
 async function handleWarm(res, query) {
@@ -253,7 +279,7 @@ async function handleWarm(res, query) {
     const licenseTypeIds = await getAllLicenseTypeIds();
     await Promise.all(
       licenseTypeIds.map((id) =>
-        ensureIndexed(stateAbbv, id).catch((err) => {
+        ensureCatalogReady(stateAbbv, id).catch((err) => {
           console.error(`Failed to warm licenseTypeId ${id}:`, err.message);
         })
       )
@@ -280,77 +306,28 @@ async function handleSearch(res, query) {
     const licenseTypeIds = await getAllLicenseTypeIds();
     await Promise.all(
       licenseTypeIds.map((id) =>
-        ensureIndexed(stateAbbv, id).catch((err) => {
-          console.error(`Failed to index licenseTypeId ${id}:`, err.message);
+        ensureCatalogReady(stateAbbv, id).catch((err) => {
+          console.error(`Failed to load catalog for licenseTypeId ${id}:`, err.message);
         })
       )
     );
 
-    // Two separate passes rather than one hybrid query — verified this
-    // matters: a blended hybrid score dilutes typo matches (a misspelled
-    // query's own embedding is a poor match even for the *correct*
-    // course — "cardic" scores only 0.217 raw cosine against "Cardiac
-    // Rehabilitation" despite being an obvious intended typo), so keyword
-    // matching and semantic rescue need independent relevance rules, not
-    // one shared score.
-
-    // Pass 1: pure keyword/typo search. Meilisearch's own native engine
-    // handles this reliably (typo tolerance included) — no relevance
-    // gating needed, unlike the semantic pass below.
-    const keywordResult = await meiliIndex.search(q, {
-      filter: `stateAbbv = "${stateAbbv}"`,
-      limit: CANDIDATE_POOL_SIZE,
-      attributesToRetrieve: ["product"],
-    });
-
+    const queryTokens = tokenize(q);
     const seen = new Set();
     const products = [];
-    for (const hit of keywordResult.hits) {
-      const id = hit.product.productId;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      products.push({ ...hit.product, matchType: "keyword" });
+    for (const id of licenseTypeIds) {
+      for (const product of getCachedCatalog(stateAbbv, id)) {
+        if (seen.has(product.productId)) continue;
+        if (!productMatchesQuery(product.__tokens, queryTokens)) continue;
+        seen.add(product.productId);
+        products.push({ ...trimProduct(product), matchType: "keyword" });
+      }
     }
+    products.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Pass 2: semantic rescue for queries with no (or weak) keyword
-    // overlap, e.g. "back pain course" -> "Low Back Pain" despite "course"
-    // not appearing in any title. Gated by raw cosine similarity computed
-    // from the retrieved stored vectors — NOT Meilisearch's hybrid
-    // _rankingScore, which is normalized relative to the current result
-    // set and doesn't behave like an absolute relevance signal (verified:
-    // pure gibberish scored 0.61+ on that scale, indistinguishable from
-    // genuine matches). Raw cosine reproduces the original calibration:
-    // genuine matches 0.4-0.8+, irrelevant/nonsense queries 0.15-0.3.
-    const vector = await embed(q);
-    const semanticResult = await meiliIndex.search(q, {
-      vector,
-      hybrid: { embedder: "default", semanticRatio: 1 },
-      filter: `stateAbbv = "${stateAbbv}"`,
-      limit: CANDIDATE_POOL_SIZE,
-      attributesToRetrieve: ["product"],
-      retrieveVectors: true,
-    });
-
-    let semanticAdditions = 0;
-    for (const hit of semanticResult.hits) {
-      const id = hit.product.productId;
-      if (seen.has(id)) continue;
-      const docVector = hit._vectors?.default?.embeddings?.[0];
-      const rawCosine = docVector ? cosineSim(vector, docVector) : 0;
-      if (rawCosine < RELEVANCE_THRESHOLD) continue;
-      seen.add(id);
-      products.push({ ...hit.product, matchType: "semantic" });
-      semanticAdditions++;
-    }
-
-    // estimatedTotalHits is meaningful for the plain-keyword pass (unlike
-    // the hybrid/vector case above) — using products.length alone would
-    // silently cap broad queries at CANDIDATE_POOL_SIZE instead of
-    // reporting how many actually match (verified: a 2-char query hit
-    // exactly the pool size, not the true ~100+ match count).
     sendJson(res, 200, {
       products: products.slice(0, limit),
-      total: (keywordResult.estimatedTotalHits ?? products.length) + semanticAdditions,
+      total: products.length,
     });
   } catch (err) {
     console.error("Search failed:", err.message);

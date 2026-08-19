@@ -99,13 +99,112 @@ function ws_search_create_tables() {
 
 function ws_search_activate() {
 	ws_search_create_tables();
+	ws_search_ensure_cron_scheduled();
 }
 register_activation_hook( __FILE__, 'ws_search_activate' );
 
 function ws_search_deactivate() {
-	wp_clear_scheduled_hook( 'ws_search_prewarm_tick' );
+	wp_clear_scheduled_hook( 'ws_search_prewarm_sweep' );
+	wp_clear_scheduled_hook( 'ws_search_prewarm_batch' );
 }
 register_deactivation_hook( __FILE__, 'ws_search_deactivate' );
+
+// ---------------------------------------------------------------------------
+// Background pre-warming via WP-Cron. The on-demand ws_ensure_indexed()
+// lazy-warm path (triggered when a real visitor picks a state) already
+// means the *first* visitor to a never-before-searched state still pays
+// the full several-second Marketing API cost. Proactively sweeping every
+// state+profession combo in the background means that cost is usually
+// already paid before a real visitor arrives.
+//
+// Unlike server.js's warmAllStatesInBackground() (a single long-running
+// Node loop with no execution-time limit), a WP-Cron callback has to fit
+// inside one HTTP request — looping over all ~150 combos at once would
+// blow past a typical shared host's max_execution_time and get killed
+// mid-sweep. So this runs as bounded batches instead: an outer recurring
+// event (WS_INDEX_TTL cadence — matching the same window a cached combo
+// is considered fresh) starts a fresh sweep, and a self-chaining single
+// event walks through it a few combos at a time until the whole catalog's
+// been touched once, then goes quiet until the next outer sweep.
+// ---------------------------------------------------------------------------
+
+const WS_PREWARM_BATCH_SIZE = 5; // combos per tick — bounded to stay well under typical execution-time limits.
+
+function ws_search_register_cron_schedule( $schedules ) {
+	$schedules['ws_index_ttl'] = array(
+		'interval' => WS_INDEX_TTL,
+		'display'  => sprintf( 'Every %d hours (WS Course Search catalog TTL)', WS_INDEX_TTL / HOUR_IN_SECONDS ),
+	);
+	return $schedules;
+}
+add_filter( 'cron_schedules', 'ws_search_register_cron_schedule' ); // phpcs:ignore
+
+// Self-healing guard, not an unconditional schedule call — wp_next_scheduled()
+// is a single cheap option read, safe to run on every request, and this
+// catches the rare case a scheduled event gets dropped (e.g. after a DB
+// restore where the activation hook never re-fires).
+function ws_search_ensure_cron_scheduled() {
+	if ( ! wp_next_scheduled( 'ws_search_prewarm_sweep' ) ) {
+		wp_schedule_event( time(), 'ws_index_ttl', 'ws_search_prewarm_sweep' );
+	}
+}
+add_action( 'init', 'ws_search_ensure_cron_scheduled' );
+
+function ws_search_get_all_combos() {
+	$combos = array();
+	foreach ( ws_get_states() as $state ) {
+		if ( empty( $state['stateAbbv'] ) ) {
+			continue;
+		}
+		foreach ( ws_get_license_type_ids() as $license_type_id ) {
+			$combos[] = array( $state['stateAbbv'], $license_type_id );
+		}
+	}
+	return $combos;
+}
+
+// Fires every WS_INDEX_TTL — starts a fresh sweep by resetting the
+// cursor/progress, then kicks off the first batch immediately.
+function ws_search_start_prewarm_sweep() {
+	update_option( 'ws_prewarm_cursor', 0, false );
+	update_option( 'ws_prewarm_progress', 0, false );
+	ws_search_run_prewarm_batch();
+}
+add_action( 'ws_search_prewarm_sweep', 'ws_search_start_prewarm_sweep' );
+
+// Processes one bounded batch, then self-chains a single event a minute
+// out to continue. ws_ensure_indexed() already no-ops quickly for combos
+// that are still fresh, so re-sweeping already-warm combos costs almost
+// nothing — only genuinely stale/missing ones pay the real fetch cost.
+function ws_search_run_prewarm_batch() {
+	$combos = ws_search_get_all_combos();
+	$total  = count( $combos );
+	if ( 0 === $total ) {
+		return;
+	}
+
+	$cursor   = (int) get_option( 'ws_prewarm_cursor', 0 );
+	$progress = (int) get_option( 'ws_prewarm_progress', 0 );
+	set_time_limit( 55 );
+
+	$batch_size = min( WS_PREWARM_BATCH_SIZE, $total );
+	for ( $i = 0; $i < $batch_size; $i++ ) {
+		list( $state_abbv, $license_type_id ) = $combos[ ( $cursor + $i ) % $total ];
+		ws_ensure_indexed( $state_abbv, $license_type_id );
+	}
+
+	$progress += $batch_size;
+	update_option( 'ws_prewarm_cursor', ( $cursor + $batch_size ) % $total, false );
+	update_option( 'ws_prewarm_progress', $progress, false );
+
+	// Keep chaining until every combo's been touched at least once this
+	// sweep; the next scheduled ws_search_prewarm_sweep starts the next
+	// pass and resets progress back to 0.
+	if ( $progress < $total && ! wp_next_scheduled( 'ws_search_prewarm_batch' ) ) {
+		wp_schedule_single_event( time() + 60, 'ws_search_prewarm_batch' );
+	}
+}
+add_action( 'ws_search_prewarm_batch', 'ws_search_run_prewarm_batch' );
 
 // ---------------------------------------------------------------------------
 // Settings page (Settings -> WS Course Search)

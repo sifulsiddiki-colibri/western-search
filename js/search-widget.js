@@ -4,10 +4,18 @@
  * <div id="ws-course-search"></div> + this script tag.
  *
  * Renders as an always-visible hero search box (per the Search v2 design),
- * not a click-to-open modal. Keyword/typo-tolerant matching and AI semantic
- * rescue both run on the backend (server.js, backed by a self-hosted
- * Meilisearch index) and come back in a single fast call — no separate slow
- * AI pass to wait for here.
+ * not a click-to-open modal. No external search service — keyword/typo
+ * matching runs entirely server-side (an in-process cache + Levenshtein
+ * scorer). Semantic ("meaning-based") matching's *storage/comparison* also
+ * runs server-side, but the embeddings themselves come from wherever the
+ * backend can actually compute them: server.js computes both catalog and
+ * query embeddings itself (Node, via @xenova/transformers) and returns
+ * both match types in one fast call; the WordPress plugin has no Node
+ * process, so its *query* embedding is computed right here in the browser
+ * (embeddings.js, same underlying model) and sent up as a second,
+ * non-blocking request after keyword results already rendered — see
+ * runSemanticRescue() below. Either way, semantic compute never delays the
+ * fast keyword path.
  */
 (function () {
   // Same-origin backend — server.js's /api/* routes when running standalone
@@ -26,9 +34,16 @@
   const WARM_ENDPOINT = WP_CONFIG
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search_warm`
     : "/api/warm";
+  // Only meaningful under WordPress (WP_CONFIG) — server.js has no
+  // equivalent endpoint since it already returns semantic matches in the
+  // main /api/search response.
+  const SEMANTIC_ENDPOINT = WP_CONFIG
+    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_semantic`
+    : null;
 
   const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
+  const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STORAGE_KEY = "wsSearchContext";
@@ -118,6 +133,7 @@
       this.root = root;
       this.options = options || {};
       this.abortController = null;
+      this.semanticAbortController = null;
       this.debounceTimer = null;
       this.activeIndex = -1;
       this.lastResults = [];
@@ -449,12 +465,68 @@
         this.lastTotal = data.total || this.lastResults.length;
         if (explicit) this.saveRecent(query);
         this.renderResults(query);
+
+        // Fire-and-forget: only meaningful when SEMANTIC_ENDPOINT exists
+        // (WordPress) — server.js's own /api/search already returned
+        // semantic matches above, so this immediately no-ops there.
+        if (SEMANTIC_ENDPOINT && WP_CONFIG.semanticEnabled) {
+          this.runSemanticRescue(query);
+        }
       } catch (err) {
         if (err.name === "AbortError") return;
         console.error("WSCourseSearch: search failed", err);
         this.showMessage("Something went wrong. Please try again.");
       } finally {
         this.root.classList.remove("is-loading");
+      }
+    }
+
+    // Computes the query's embedding right here in the browser (the
+    // WordPress plugin has no server-side embedding model to call) and
+    // sends it up for a plain cosine-similarity comparison against
+    // precomputed catalog vectors. Runs *after* keyword results are
+    // already on screen, and merges in as a late addition — never blocks
+    // or delays the fast keyword path, since embedding compute alone can
+    // take longer than the whole keyword round trip.
+    async runSemanticRescue(query) {
+      if (query.length < SEMANTIC_MIN_QUERY_LENGTH) return;
+
+      if (this.semanticAbortController) this.semanticAbortController.abort();
+      const controller = new AbortController();
+      this.semanticAbortController = controller;
+
+      const stillCurrent = () =>
+        !controller.signal.aborted && this.input.value.trim() === query;
+
+      try {
+        const { embed } = await import(WP_CONFIG.embeddingsModuleUrl);
+        if (!stillCurrent()) return;
+
+        const vector = await embed(query);
+        if (!stillCurrent()) return;
+
+        const params = new URLSearchParams({
+          state: this.context.stateAbbv,
+          q: query,
+          vector: JSON.stringify(vector),
+          exclude: this.lastResults.map((p) => p.productId).join(","),
+          limit: String(this.expanded ? EXPANDED_LIMIT : TYPEAHEAD_LIMIT),
+        });
+
+        const res = await fetch(withParams(SEMANTIC_ENDPOINT, params), {
+          signal: controller.signal,
+        });
+        if (!res.ok || !stillCurrent()) return;
+
+        const data = await res.json();
+        const additions = data.products || [];
+        if (!additions.length || !stillCurrent()) return;
+
+        this.lastResults = [...this.lastResults, ...additions];
+        this.renderResults(query);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        console.error("WSCourseSearch: semantic rescue failed", err);
       }
     }
 

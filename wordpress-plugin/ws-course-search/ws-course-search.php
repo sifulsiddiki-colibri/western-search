@@ -26,6 +26,12 @@ const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.
 // benefit. 6h keeps same-day catalog changes visible while making that
 // cost rare in practice instead of a recurring "switch state, wait" hit.
 const WS_INDEX_TTL = 6 * 60 * 60; // seconds
+const WS_RELEVANCE_THRESHOLD       = 0.4; // raw cosine cutoff — see ws_search_handle_semantic().
+const WS_SEMANTIC_MIN_QUERY_LENGTH = 4;   // too little signal for embeddings below this.
+
+function ws_semantic_enabled() {
+	return '0' !== get_option( 'ws_semantic_enabled', '1' );
+}
 
 // ---------------------------------------------------------------------------
 // DB schema — replaces the Meilisearch-hosted index entirely. Catalog data
@@ -238,20 +244,49 @@ function ws_search_add_settings_page() {
 }
 add_action( 'admin_menu', 'ws_search_add_settings_page' );
 
+function ws_search_register_settings() {
+	register_setting(
+		'ws_course_search',
+		'ws_semantic_enabled',
+		array(
+			'sanitize_callback' => 'sanitize_text_field',
+			'default'           => '1',
+		)
+	);
+}
+add_action( 'admin_init', 'ws_search_register_settings' );
+
 function ws_search_render_settings_page() {
 	?>
 	<div class="wrap">
 		<h1>WS Course Search</h1>
 		<p>Keyword and typo-tolerant search run automatically — no configuration needed.</p>
 
-		<h2>Semantic search embeddings</h2>
+		<h2>Semantic search</h2>
+		<form action="options.php" method="post">
+			<?php settings_fields( 'ws_course_search' ); ?>
+			<label>
+				<input type="hidden" name="ws_semantic_enabled" value="0" />
+				<input type="checkbox" name="ws_semantic_enabled" value="1" <?php checked( ws_semantic_enabled() ); ?> />
+				Enable semantic ("meaning-based") search
+			</label>
+			<p class="description">
+				When enabled, a visitor's browser downloads a one-time (then
+				browser-cached) ~30MB embedding model the first time they search,
+				to power meaning-based matches like "back pain course" &rarr;
+				"Low Back Pain". Turning this off keeps search to fast keyword/typo
+				matching only, with no extra download for visitors.
+			</p>
+			<?php submit_button( 'Save' ); ?>
+		</form>
+
+		<h2>Catalog embeddings</h2>
 		<p>
-			Semantic ("meaning-based") search needs a numeric embedding computed
-			for every course. That computation runs in <strong>this browser,
-			right now</strong> — not on the server, since there's no embedding
-			model running there. Click the button below after the catalog
-			changes; existing courses that haven't changed are skipped
-			automatically.
+			Semantic search needs a numeric embedding computed for every course.
+			That computation runs in <strong>this browser, right now</strong> —
+			not on the server, since there's no embedding model running there.
+			Click the button below after the catalog changes; existing courses
+			that haven't changed are skipped automatically.
 		</p>
 		<button type="button" id="ws-refresh-embeddings" class="button button-primary">
 			Refresh search embeddings
@@ -307,7 +342,11 @@ function ws_search_enqueue_assets() {
 		'ws-course-search',
 		'wsSearchConfig',
 		array(
-			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+			'ajaxUrl'             => admin_url( 'admin-ajax.php' ),
+			'semanticEnabled'     => ws_semantic_enabled(),
+			'embeddingsModuleUrl' => plugins_url( 'assets/embeddings.js', __FILE__ ),
+			'modelsUrl'           => plugins_url( 'assets/models/', __FILE__ ),
+			'wasmUrl'             => plugins_url( 'assets/vendor/', __FILE__ ),
 		)
 	);
 }
@@ -847,3 +886,104 @@ function ws_search_handle_save_embeddings() {
 	wp_send_json( array( 'saved' => $saved ) );
 }
 add_action( 'wp_ajax_ws_search_save_embeddings', 'ws_search_handle_save_embeddings' );
+
+// Raw cosine similarity — these vectors aren't guaranteed pre-normalized,
+// so this uses the full formula rather than a bare dot product.
+function ws_cosine_similarity( $a, $b ) {
+	$dot = 0.0;
+	$na  = 0.0;
+	$nb  = 0.0;
+	$len = min( count( $a ), count( $b ) );
+	for ( $i = 0; $i < $len; $i++ ) {
+		$dot += $a[ $i ] * $b[ $i ];
+		$na  += $a[ $i ] * $a[ $i ];
+		$nb  += $b[ $i ] * $b[ $i ];
+	}
+	if ( 0.0 === $na || 0.0 === $nb ) {
+		return 0.0;
+	}
+	return $dot / ( sqrt( $na ) * sqrt( $nb ) );
+}
+
+// Query-side semantic search: the visitor's own browser already computed
+// the query's embedding (embeddings.js) and sends it here as plain JSON —
+// this endpoint only does the cosine-similarity comparison against
+// precomputed catalog vectors, never computes an embedding itself. Called
+// as a second, non-blocking request *after* keyword results already
+// rendered (see runSemanticRescue() in search-widget.js) so semantic
+// compute time never delays the fast keyword path.
+function ws_search_handle_semantic() {
+	if ( ! ws_semantic_enabled() ) {
+		wp_send_json( array( 'products' => array() ) );
+	}
+
+	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+	$q          = isset( $_GET['q'] ) ? trim( sanitize_text_field( wp_unslash( $_GET['q'] ) ) ) : '';
+	$limit      = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 8;
+	$vector_raw = isset( $_GET['vector'] ) ? wp_unslash( $_GET['vector'] ) : '';
+	$exclude    = isset( $_GET['exclude'] ) ? array_filter( explode( ',', wp_unslash( $_GET['exclude'] ) ) ) : array();
+
+	if ( ! $state_abbv || strlen( $q ) < WS_SEMANTIC_MIN_QUERY_LENGTH || ! $vector_raw ) {
+		wp_send_json( array( 'products' => array() ) );
+	}
+
+	$query_vector = json_decode( $vector_raw, true );
+	if ( ! is_array( $query_vector ) ) {
+		wp_send_json( array( 'products' => array() ) );
+	}
+
+	global $wpdb;
+	$catalog_table    = ws_catalog_table();
+	$embeddings_table = ws_embeddings_table();
+	$exclude_flip     = array_flip( $exclude );
+
+	$rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT c.*, e.vector AS embedding
+			 FROM {$catalog_table} c
+			 INNER JOIN {$embeddings_table} e ON e.product_id = c.product_id
+			 WHERE c.state_abbv = %s AND c.product_id != %s",
+			$state_abbv,
+			WS_EMPTY_CATALOG_MARKER
+		),
+		ARRAY_A
+	);
+
+	$seen   = array();
+	$scored = array();
+	foreach ( $rows as $row ) {
+		$id = $row['product_id'];
+		if ( isset( $exclude_flip[ $id ] ) || isset( $seen[ $id ] ) ) {
+			continue;
+		}
+		$seen[ $id ] = true;
+
+		$doc_vector = array_values( unpack( 'f*', base64_decode( $row['embedding'] ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+		$score      = ws_cosine_similarity( $query_vector, $doc_vector );
+		if ( $score < WS_RELEVANCE_THRESHOLD ) {
+			continue;
+		}
+		$scored[] = array(
+			'row'   => $row,
+			'score' => $score,
+		);
+	}
+
+	usort(
+		$scored,
+		function ( $a, $b ) {
+			return $b['score'] <=> $a['score'];
+		}
+	);
+
+	$products = array_map(
+		function ( $entry ) {
+			return ws_row_to_product( $entry['row'], 'semantic' );
+		},
+		array_slice( $scored, 0, $limit )
+	);
+
+	wp_send_json( array( 'products' => $products ) );
+}
+add_action( 'wp_ajax_ws_search_semantic', 'ws_search_handle_semantic' );
+add_action( 'wp_ajax_nopriv_ws_search_semantic', 'ws_search_handle_semantic' );

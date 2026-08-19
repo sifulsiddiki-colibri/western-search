@@ -10,7 +10,10 @@
  */
 import { pipeline, env } from "./vendor/transformers.min.js";
 
-const config = window.wsEmbeddingsConfig || {};
+// Admin settings page localizes wsEmbeddingsConfig; the frontend search
+// widget localizes the same modelsUrl/wasmUrl keys onto wsSearchConfig —
+// either source works, whichever context this module gets imported from.
+const config = window.wsEmbeddingsConfig || window.wsSearchConfig || {};
 
 env.allowRemoteModels = false;
 env.allowLocalModels = true;

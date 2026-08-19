@@ -80,6 +80,7 @@ function ws_search_create_tables() {
 			credit_type VARCHAR(64) NULL,
 			title_tokens TEXT NULL,
 			description_tokens LONGTEXT NULL,
+			tags_raw TEXT NULL,
 			cached_at DATETIME NOT NULL,
 			PRIMARY KEY  (product_id, state_abbv, license_type_id),
 			KEY state_license (state_abbv, license_type_id)
@@ -100,8 +101,24 @@ function ws_search_create_tables() {
 function ws_search_activate() {
 	ws_search_create_tables();
 	ws_search_ensure_cron_scheduled();
+	update_option( 'ws_search_db_version', WS_SEARCH_DB_VERSION, false );
 }
 register_activation_hook( __FILE__, 'ws_search_activate' );
+
+// dbDelta() is idempotent and additive (it diffs the schema and only adds
+// what's missing), so re-running it on an already-active install is safe
+// — this just means a schema change (e.g. the tags_raw column, added
+// after the initial release) reaches sites that installed before that
+// change, without requiring a manual deactivate/reactivate.
+const WS_SEARCH_DB_VERSION = '2';
+function ws_search_maybe_upgrade_db() {
+	if ( get_option( 'ws_search_db_version' ) === WS_SEARCH_DB_VERSION ) {
+		return;
+	}
+	ws_search_create_tables();
+	update_option( 'ws_search_db_version', WS_SEARCH_DB_VERSION, false );
+}
+add_action( 'plugins_loaded', 'ws_search_maybe_upgrade_db' );
 
 function ws_search_deactivate() {
 	wp_clear_scheduled_hook( 'ws_search_prewarm_sweep' );
@@ -226,9 +243,47 @@ function ws_search_render_settings_page() {
 	<div class="wrap">
 		<h1>WS Course Search</h1>
 		<p>Keyword and typo-tolerant search run automatically — no configuration needed.</p>
+
+		<h2>Semantic search embeddings</h2>
+		<p>
+			Semantic ("meaning-based") search needs a numeric embedding computed
+			for every course. That computation runs in <strong>this browser,
+			right now</strong> — not on the server, since there's no embedding
+			model running there. Click the button below after the catalog
+			changes; existing courses that haven't changed are skipped
+			automatically.
+		</p>
+		<button type="button" id="ws-refresh-embeddings" class="button button-primary">
+			Refresh search embeddings
+		</button>
+		<p id="ws-embeddings-status"></p>
 	</div>
 	<?php
 }
+
+function ws_search_enqueue_admin_assets( $hook ) {
+	if ( 'settings_page_ws-course-search' !== $hook ) {
+		return;
+	}
+	wp_enqueue_script(
+		'ws-course-search-admin-embeddings',
+		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
+		array(),
+		'4.0.0',
+		true
+	);
+	wp_localize_script(
+		'ws-course-search-admin-embeddings',
+		'wsEmbeddingsConfig',
+		array(
+			'ajaxUrl'             => admin_url( 'admin-ajax.php' ),
+			'embeddingsModuleUrl' => plugins_url( 'assets/embeddings.js', __FILE__ ),
+			'modelsUrl'           => plugins_url( 'assets/models/', __FILE__ ),
+			'wasmUrl'             => plugins_url( 'assets/vendor/', __FILE__ ),
+		)
+	);
+}
+add_action( 'admin_enqueue_scripts', 'ws_search_enqueue_admin_assets' );
 
 // ---------------------------------------------------------------------------
 // Asset registration
@@ -397,6 +452,20 @@ function ws_build_description_text( $product ) {
 	return wp_strip_all_tags( (string) ( $offering['description'] ?? '' ) );
 }
 
+// Raw (untokenized) tag values, kept alongside the product so the
+// semantic-embedding text (name + tags — see embeddings.js's embedText())
+// can be reconstructed later without re-fetching from the Marketing API.
+function ws_build_tags_raw( $product ) {
+	$offering = ! empty( $product['offerings'][0] ) ? $product['offerings'][0] : array();
+	$tags     = array_map(
+		function ( $tag ) {
+			return $tag['tagValue'];
+		},
+		$offering['tags'] ?? array()
+	);
+	return implode( ', ', $tags );
+}
+
 // Scales allowed typos with query-token length, matching common
 // typo-tolerant search conventions (Algolia/Elasticsearch use similar bands).
 function ws_allowed_typos( $len ) {
@@ -504,6 +573,7 @@ function ws_do_index( $state_abbv, $license_type_id ) {
 				'credit_type'        => $offering['creditType'] ?? '',
 				'title_tokens'       => implode( ' ', ws_tokenize( ws_build_title_text( $product ) ) ),
 				'description_tokens' => implode( ' ', ws_tokenize( ws_build_description_text( $product ) ) ),
+				'tags_raw'           => ws_build_tags_raw( $product ),
 				'cached_at'          => $now,
 			)
 		);
@@ -659,3 +729,121 @@ function ws_search_handle_search() {
 }
 add_action( 'wp_ajax_ws_search', 'ws_search_handle_search' );
 add_action( 'wp_ajax_nopriv_ws_search', 'ws_search_handle_search' );
+
+// ---------------------------------------------------------------------------
+// Semantic search — embeddings computed in the browser, never on the
+// server. Catalog-side: an admin-triggered refresh (Settings -> WS Course
+// Search) runs the same model client-side and POSTs vectors back in
+// batches. Query-side (wired into live search in the next phase): the
+// visitor's own browser computes the query's embedding the same way.
+// ---------------------------------------------------------------------------
+
+const WS_EMBEDDING_LOCK_TTL = 90; // seconds — refreshed (heartbeat) by each batch save.
+
+// name + tags — must exactly match embeddings.js's embedText() so catalog
+// and query embeddings land in the same vector space.
+function ws_embedding_text( $name, $tags_raw ) {
+	return implode( '. ', array_filter( array( $name, $tags_raw ) ) );
+}
+
+// One row per *distinct* product_id — embedding text doesn't vary by
+// state/license (a Nursing course sold in 50 states has identical name+
+// tags in all 50), so embedding it once per state would be pure waste.
+// source_hash catches content drift (same productId, changed name/tags)
+// that a plain "row exists" check would miss.
+function ws_search_handle_embeddings_needed() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json( array( 'error' => 'forbidden' ), 403 );
+	}
+
+	if ( get_transient( 'ws_embedding_refresh_lock' ) ) {
+		wp_send_json( array( 'locked' => true ) );
+	}
+	set_transient( 'ws_embedding_refresh_lock', 1, WS_EMBEDDING_LOCK_TTL );
+
+	global $wpdb;
+	$catalog_table    = ws_catalog_table();
+	$embeddings_table = ws_embeddings_table();
+
+	$rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT product_id, MAX(name) AS name, MAX(tags_raw) AS tags_raw
+			 FROM {$catalog_table}
+			 WHERE product_id != %s
+			 GROUP BY product_id",
+			WS_EMPTY_CATALOG_MARKER
+		),
+		ARRAY_A
+	);
+
+	$existing_hashes = array();
+	foreach ( $wpdb->get_results( "SELECT product_id, source_hash FROM {$embeddings_table}", ARRAY_A ) as $row ) {
+		$existing_hashes[ $row['product_id'] ] = $row['source_hash'];
+	}
+
+	$needed = array();
+	foreach ( $rows as $row ) {
+		$text = ws_embedding_text( $row['name'], $row['tags_raw'] );
+		$hash = md5( $text );
+		if ( isset( $existing_hashes[ $row['product_id'] ] ) && $existing_hashes[ $row['product_id'] ] === $hash ) {
+			continue;
+		}
+		$needed[] = array(
+			'productId'  => $row['product_id'],
+			'text'       => $text,
+			'sourceHash' => $hash,
+		);
+	}
+
+	wp_send_json(
+		array(
+			'total'  => count( $rows ),
+			'needed' => $needed,
+		)
+	);
+}
+add_action( 'wp_ajax_ws_search_embeddings_needed', 'ws_search_handle_embeddings_needed' );
+
+// Vectors are base64-encoded packed floats rather than raw binary —
+// $wpdb's escaping path is charset-aware and can mangle arbitrary binary
+// bytes on a real MySQL connection, while a base64 string is plain ASCII
+// and immune to that regardless of connection charset.
+function ws_search_handle_save_embeddings() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json( array( 'error' => 'forbidden' ), 403 );
+	}
+
+	$body  = json_decode( file_get_contents( 'php://input' ), true );
+	$items = isset( $body['items'] ) && is_array( $body['items'] ) ? $body['items'] : array();
+
+	global $wpdb;
+	$table = ws_embeddings_table();
+	$saved = 0;
+
+	foreach ( $items as $item ) {
+		if ( empty( $item['productId'] ) || empty( $item['vector'] ) || empty( $item['sourceHash'] ) ) {
+			continue;
+		}
+		$vector = array_map( 'floatval', (array) $item['vector'] );
+		$packed = pack( 'f*', ...$vector );
+
+		$wpdb->replace(
+			$table,
+			array(
+				'product_id'  => sanitize_text_field( $item['productId'] ),
+				'vector'      => base64_encode( $packed ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
+				'source_hash' => sanitize_text_field( $item['sourceHash'] ),
+				'embedded_at' => current_time( 'mysql' ),
+			)
+		);
+		++$saved;
+	}
+
+	// Heartbeat — a still-running refresh keeps renewing the lock; if the
+	// admin's tab closes, nothing renews it and it simply expires on its
+	// own (no separate "release" call needed).
+	set_transient( 'ws_embedding_refresh_lock', 1, WS_EMBEDDING_LOCK_TTL );
+
+	wp_send_json( array( 'saved' => $saved ) );
+}
+add_action( 'wp_ajax_ws_search_save_embeddings', 'ws_search_handle_save_embeddings' );

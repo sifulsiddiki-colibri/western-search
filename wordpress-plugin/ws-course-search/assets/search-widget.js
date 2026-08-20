@@ -89,6 +89,14 @@
       .replace(/^-+|-+$/g, "");
   }
 
+  // Only meaningful under WordPress (WP_CONFIG.viewAllBase) — the local Node
+  // prototype has no such page and keeps expanding the dropdown in place.
+  function buildViewAllUrl(baseUrl, professionSlug, query, stateAbbv) {
+    const params = new URLSearchParams({ searchPhrase: query });
+    if (stateAbbv) params.set("state", stateAbbv);
+    return `${baseUrl}/${professionSlug}/view-all/?${params.toString()}`;
+  }
+
   function defaultProductUrl(product, stateAbbv) {
     const offering = (product.offerings || [])[0];
     const licenseType = offering && offering.licenseType;
@@ -140,6 +148,7 @@
       this.lastTotal = 0;
       this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
+      this.professionSlug = this.options.defaultProfession || "nursing";
 
       this.context = this.loadContext();
       this.recent = this.loadRecent();
@@ -293,7 +302,10 @@
         this.onInput();
         this.input.focus();
       });
-      this.submitBtn.addEventListener("click", () => this.runSearch(false, true));
+      this.submitBtn.addEventListener("click", () => {
+        if (this.goToViewAll(this.input.value.trim())) return;
+        this.runSearch(false, true);
+      });
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this.closeResults();
       });
@@ -389,6 +401,22 @@
       this.debounceTimer = setTimeout(() => this.runSearch(), DEBOUNCE_MS);
     }
 
+    // Navigates to the "view all results" page instead of expanding the
+    // dropdown further — only when running under WordPress with a
+    // configured viewAllBase. Returns false (does nothing) otherwise, so
+    // callers can fall through to the existing inline-expand behavior.
+    goToViewAll(query) {
+      if (!WP_CONFIG || !WP_CONFIG.viewAllBase || !query) return false;
+      this.saveRecent(query);
+      window.location.href = buildViewAllUrl(
+        WP_CONFIG.viewAllBase,
+        this.professionSlug,
+        query,
+        this.context.stateAbbv
+      );
+      return true;
+    }
+
     onKeyDown(e) {
       const items = this.resultsEl.querySelectorAll(".ws-search__result");
       if (!items.length) return;
@@ -409,6 +437,8 @@
             this.lastResults[this.activeIndex],
             this.context.stateAbbv
           );
+        } else if (this.goToViewAll(this.input.value.trim())) {
+          e.preventDefault();
         } else {
           this.runSearch(false, true);
         }
@@ -588,7 +618,10 @@
 
       const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
       if (seeAllBtn) {
-        seeAllBtn.addEventListener("click", () => this.runSearch(true, true));
+        seeAllBtn.addEventListener("click", () => {
+          if (this.goToViewAll(query)) return;
+          this.runSearch(true, true);
+        });
       }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
         a.addEventListener("click", () => this.saveRecent(query));

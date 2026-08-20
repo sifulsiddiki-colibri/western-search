@@ -19,6 +19,13 @@ if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
 	define( 'WS_MARKETING_API_BASE', 'https://test-api-ms.westernschools.com' );
 }
 
+// The "view all results" page lives on the main site, not the Marketing API —
+// clicking Search/Enter/"see all" sends the visitor there instead of expanding
+// the dropdown further. Test host until this is confirmed on production.
+if ( ! defined( 'WS_VIEW_ALL_BASE' ) ) {
+	define( 'WS_VIEW_ALL_BASE', 'https://test.westernschools.com' );
+}
+
 const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.
 // Course catalogs don't change minute-to-minute, so this can be generous —
 // a short TTL just means more real users hit the several-second cold-cache
@@ -347,6 +354,7 @@ function ws_search_enqueue_assets() {
 			'embeddingsModuleUrl' => plugins_url( 'assets/embeddings.js', __FILE__ ),
 			'modelsUrl'           => plugins_url( 'assets/models/', __FILE__ ),
 			'wasmUrl'             => plugins_url( 'assets/vendor/', __FILE__ ),
+			'viewAllBase'         => WS_VIEW_ALL_BASE,
 		)
 	);
 }
@@ -358,7 +366,13 @@ add_action( 'wp_enqueue_scripts', 'ws_search_enqueue_assets' );
  * site wide search to homepage and within product listing pages" guidance.
  */
 function ws_search_shortcode( $atts ) {
-	$atts = shortcode_atts( array( 'default_state' => 'FL' ), $atts );
+	$atts = shortcode_atts(
+		array(
+			'default_state'      => 'FL',
+			'default_profession' => 'nursing',
+		),
+		$atts
+	);
 	ob_start();
 	?>
 	<div id="ws-course-search"></div>
@@ -366,6 +380,7 @@ function ws_search_shortcode( $atts ) {
 		document.addEventListener('DOMContentLoaded', function () {
 			WSCourseSearch.init('#ws-course-search', {
 				defaultState: '<?php echo esc_js( $atts['default_state'] ); ?>',
+				defaultProfession: '<?php echo esc_js( $atts['default_profession'] ); ?>',
 			});
 		});
 	</script>

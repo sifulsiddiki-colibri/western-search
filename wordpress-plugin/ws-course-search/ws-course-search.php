@@ -57,6 +57,11 @@ function ws_embeddings_table() {
 	return $wpdb->prefix . 'ws_embeddings';
 }
 
+function ws_search_log_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'ws_search_log';
+}
+
 // One row per (product_id, state_abbv, license_type_id) — a product can
 // legitimately repeat across state/license combos with different
 // pricing/approval, so the composite key matters (same reasoning the old
@@ -75,6 +80,7 @@ function ws_search_create_tables() {
 	$charset_collate  = $wpdb->get_charset_collate();
 	$catalog_table    = ws_catalog_table();
 	$embeddings_table = ws_embeddings_table();
+	$search_log_table = ws_search_log_table();
 
 	dbDelta(
 		"CREATE TABLE {$catalog_table} (
@@ -109,6 +115,24 @@ function ws_search_create_tables() {
 			PRIMARY KEY  (product_id)
 		) {$charset_collate};"
 	);
+
+	// What people actually search for — not tracked anywhere today (see
+	// architecture doc §8, "Search analytics"). One row per committed
+	// search (button/Enter/selecting a result), not every keystroke — the
+	// JS side only logs at the same points it saves to "recent searches".
+	// No UI on this yet; it just needs to exist so the data is there when
+	// someone asks for it.
+	dbDelta(
+		"CREATE TABLE {$search_log_table} (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			query VARCHAR(255) NOT NULL,
+			state_abbv VARCHAR(8) NULL,
+			result_count INT UNSIGNED NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY created_at (created_at)
+		) {$charset_collate};"
+	);
 }
 
 function ws_search_activate() {
@@ -123,7 +147,7 @@ register_activation_hook( __FILE__, 'ws_search_activate' );
 // — this just means a schema change (e.g. the tags_raw column, added
 // after the initial release) reaches sites that installed before that
 // change, without requiring a manual deactivate/reactivate.
-const WS_SEARCH_DB_VERSION = '2';
+const WS_SEARCH_DB_VERSION = '3'; // '3' adds wp_ws_search_log.
 function ws_search_maybe_upgrade_db() {
 	if ( get_option( 'ws_search_db_version' ) === WS_SEARCH_DB_VERSION ) {
 		return;
@@ -869,6 +893,39 @@ function ws_search_handle_search() {
 }
 add_action( 'wp_ajax_ws_search', 'ws_search_handle_search' );
 add_action( 'wp_ajax_nopriv_ws_search', 'ws_search_handle_search' );
+
+// Logs a committed search term (see the JS side's saveRecent() — this rides
+// the same "explicit commit, not every keystroke" moments "recent searches"
+// already uses). No auth/nonce, same as the other public search endpoints
+// above; a plain insert, so worst case a malicious caller pollutes the log
+// table, not the catalog itself. query is capped to the column width —
+// silently truncated rather than rejected, since a too-long search phrase
+// isn't actionable to reject, just not fully loggable.
+function ws_search_handle_log_term() {
+	$body         = json_decode( file_get_contents( 'php://input' ), true );
+	$query        = isset( $body['query'] ) ? sanitize_text_field( $body['query'] ) : '';
+	$state_abbv   = isset( $body['stateAbbv'] ) ? sanitize_text_field( $body['stateAbbv'] ) : '';
+	$result_count = isset( $body['resultCount'] ) ? (int) $body['resultCount'] : null;
+
+	if ( '' === $query ) {
+		wp_send_json( array( 'error' => 'query is required' ), 400 );
+	}
+
+	global $wpdb;
+	$wpdb->insert(
+		ws_search_log_table(),
+		array(
+			'query'        => mb_substr( $query, 0, 255 ),
+			'state_abbv'   => $state_abbv ? $state_abbv : null,
+			'result_count' => $result_count,
+			'created_at'   => current_time( 'mysql' ),
+		)
+	);
+
+	wp_send_json( array( 'logged' => true ) );
+}
+add_action( 'wp_ajax_ws_search_log_term', 'ws_search_handle_log_term' );
+add_action( 'wp_ajax_nopriv_ws_search_log_term', 'ws_search_handle_log_term' );
 
 // ---------------------------------------------------------------------------
 // Semantic search — embeddings computed in the browser, never on the

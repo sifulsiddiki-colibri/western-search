@@ -40,6 +40,12 @@
   const SEMANTIC_ENDPOINT = WP_CONFIG
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search_semantic`
     : null;
+  // Only meaningful under WordPress — search-term analytics is a WP-plugin
+  // deliverable (see architecture doc §8); the local Node prototype has no
+  // matching /api/log-search route.
+  const LOG_TERM_ENDPOINT = WP_CONFIG
+    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_log_term`
+    : null;
 
   const DEBOUNCE_MS = 150;
   const MIN_QUERY_LENGTH = 2;
@@ -237,6 +243,25 @@
       );
       localStorage.setItem(this.recentKey, JSON.stringify(this.recent));
       this.renderRecent();
+      this.logSearchTerm(query);
+    }
+
+    // Analytics only — every call site of saveRecent() is already an
+    // "explicit commit" (Enter, Search button, picking a result), never a
+    // raw keystroke, so this piggybacks on that instead of needing its own
+    // debounce. Fire-and-forget: a dropped log shouldn't ever block or
+    // visibly affect the search itself.
+    logSearchTerm(query) {
+      if (!LOG_TERM_ENDPOINT || !query) return;
+      fetch(LOG_TERM_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          stateAbbv: this.context.stateAbbv,
+          resultCount: this.lastTotal,
+        }),
+      }).catch(() => {});
     }
 
     clearRecent() {

@@ -77,7 +77,7 @@ moved to wherever a browser already is — no new infrastructure at all.
 
 ## How catalog data is stored
 
-Two custom tables (created via `dbDelta` on plugin activation, migrated
+Three custom tables (created via `dbDelta` on plugin activation, migrated
 automatically on upgrade — see `ws_search_maybe_upgrade_db()`):
 
 - **`wp_ws_catalog`** — one row per `(product_id, state_abbv,
@@ -92,6 +92,12 @@ automatically on upgrade — see `ws_search_maybe_upgrade_db()`):
   same embedding up to ~50× for a widely-sold course. A `source_hash`
   column catches content drift (same product, changed name/tags) that a
   plain "row exists" check would miss.
+- **`wp_ws_search_log`** — one row per committed search (`ws_search_log_term`,
+  called from the JS side's `saveRecent()`, i.e. the same explicit-commit
+  moments — button/Enter/picking a result — "recent searches" already uses,
+  not every keystroke): `query`, `state_abbv`, `result_count`, `created_at`.
+  Western didn't track search terms before this plugin (architecture doc
+  §8). No admin UI on top of it yet — the data just needs to exist.
 
 Transients were deliberately **not** used for catalog/embedding data itself
 (too large and too frequently re-read for `wp_options` on a host with no

@@ -2,15 +2,18 @@
 
 No external search service — no Meilisearch, no separate application server,
 no third-party embeddings API. Keyword search, typo tolerance, and catalog
-storage all live in plain PHP `admin-ajax.php` handlers and two plugin-owned
-database tables (`ws_catalog`, `ws_embeddings`) in `ws-course-search.php`. AI
-semantic matching's embeddings are computed **in the browser** — the visitor's
-own browser for search queries, an admin's browser for the catalog — not on
-the server.
+storage all live in plain PHP `admin-ajax.php` handlers and three plugin-owned
+database tables (`ws_catalog`, `ws_embeddings`, `ws_search_log`) in
+`ws-course-search.php`. AI semantic matching's embeddings are computed **in
+the browser** — the visitor's own browser for search queries, an admin's
+browser for the catalog — not on the server. Delivered as both a Gutenberg
+block (`ws-course-search/search`, the required format) and a
+`[ws_course_search]` shortcode, sharing one render function so they can never
+drift apart.
 
 **Tested end-to-end** against a real WordPress instance (WordPress core +
 the official SQLite Database Integration plugin, no MySQL needed) — not just
-reviewed. Verified: plugin activation creates both tables correctly; keyword
+reviewed. Verified: plugin activation creates all tables correctly; keyword
 search, typo tolerance ("cardic" → Cardiac Rehabilitation), and nonsense
 queries returning zero results all round-trip through the real
 `admin-ajax.php` flow; the background WP-Cron pre-warm sweep processes real
@@ -18,11 +21,54 @@ batches and self-chains correctly; the embeddings-needed/save-embeddings
 endpoints correctly dedupe by content hash and store/reconstruct real model
 vectors with zero precision loss; semantic search correctly surfaces "Low
 Back Pain" for "back pain course" (zero literal keyword overlap) and
-correctly returns nothing for a genuinely unrelated query. The one thing this
-environment couldn't drive directly is literal in-browser WASM execution (no
-headless browser available) — verified instead by computing real embeddings
-through the same model via Node and feeding them through the actual PHP
-endpoints, which is everything this plugin's own code is responsible for.
+correctly returns nothing for a genuinely unrelated query; the block inserts
+and renders correctly in the block editor; multiple widget instances on one
+page (block + block, and block + shortcode together) stay fully independent
+— unique container ids, namespaced `localStorage`, searching one never
+touches another; the state type-ahead correctly narrows on 2-3 letters and
+is selectable by keyboard and mouse. The one thing this environment couldn't
+drive directly is literal in-browser WASM execution (no headless browser
+available) — verified instead by computing real embeddings through the same
+model via Node and feeding them through the actual PHP endpoints, which is
+everything this plugin's own code is responsible for.
+
+The `ws-search:results` hand-off event and `ws_search_log_term` capture
+(below) are newer and were verified with an automated harness that loads
+this actual `assets/search-widget.js` into `jsdom` and drives it — real
+code, real DOM, real fetch payloads — rather than the live WordPress
+instance above. Re-running them through the same live-instance flow before
+Wednesday is still worth doing.
+
+## Front end: block, multi-instance, state type-ahead
+
+- **Gutenberg block** (`ws-course-search/search`) — a *dynamic* block:
+  `save()` returns `null`, so `ws_search_render_widget()` in
+  `ws-course-search.php` is the one and only place the markup is generated,
+  called fresh on every front-end render for both the block and the
+  `[ws_course_search]` shortcode. The block editor (`assets/block-editor.js`)
+  shows a static placeholder rather than a live preview, since a
+  `ServerSideRender`-injected `<script>` tag never actually executes. Same
+  three attributes either way: `default_state`, `default_profession`,
+  `hide_state_field`.
+- **Multiple instances** — each call to `ws_search_render_widget()` gets its
+  own `wp_unique_id()`'d container; `assets/search-widget.js` also generates
+  a fallback id itself (`ensureUniqueId()`) so it's never dependent on the
+  caller having done that. Every per-instance thing — the results list id,
+  `localStorage` context/recent-searches keys — is namespaced off that
+  container id, so a page can carry any mix of blocks and the shortcode
+  without instances colliding.
+- **State type-ahead** — replaced the native `<select>` with a text input
+  that suggests states as you type (2-3 letters narrows it down), selectable
+  by keyboard (arrow keys + Enter) or mouse. Always starts on "Select your
+  state" — see the `default_state` fix note below — unless a prior visit
+  left one in `localStorage` or the page explicitly passes `default_state` +
+  `hide_state_field` (e.g. a state-specific listings page that already knows
+  the state and doesn't need to ask).
+
+**Fixed:** the block/shortcode `default_state` attribute used to default to
+`"FL"`, so dropping the block on a page without touching its settings
+silently pre-filled Florida — violating the "always start on Select your
+state" requirement. Defaults to an empty string now.
 
 ## Hand-off event: `ws-search:results`
 
@@ -163,8 +209,8 @@ fast keyword/typo matching only with no extra download for visitors.
    `ws-course-search.zip` (WP Admin only — also how to push an updated zip
    to replace an already-installed version, no file access needed).
 2. Activate it from the WordPress admin (Plugins → Installed Plugins). This
-   creates the `ws_catalog`/`ws_embeddings` tables and schedules the
-   background pre-warm sweep.
+   creates the `ws_catalog`/`ws_embeddings`/`ws_search_log` tables and
+   schedules the background pre-warm sweep.
 3. Add `[ws_course_search]` to the homepage and product listing page
    templates, or insert the **WS Course Search** block directly in the
    block editor — both render the same widget. Leave `default_state` unset
@@ -179,6 +225,11 @@ fast keyword/typo matching only with no extra download for visitors.
 
 ## Still open
 
+- Search-term analytics (`wp_ws_search_log`) landed as a new admin-ajax
+  endpoint writing to a plugin-owned table — one reasonable reading of the
+  architecture doc's still-open "confirm whether this rides on the new REST
+  endpoint... or a separate mechanism" item, not an explicit sign-off from
+  Ben/Saru/Dawn. No retention policy or admin UI on top of it yet either.
 - Only the `nursing` profession's course-URL slug is confirmed against a
   real page (in `assets/search-widget.js`). The other two are a
   best-guess slugification.

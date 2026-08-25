@@ -384,6 +384,12 @@ add_action( 'wp_enqueue_scripts', 'ws_search_enqueue_assets' );
  * delivery mechanisms can never drift apart. $atts/$attributes both use
  * the same 'default_state'/'default_profession' keys (shortcode_atts()
  * and the block's registered attributes agree on that shape).
+ *
+ * Each call gets its own wp_unique_id()'d container — a page can have
+ * several instances (e.g. more than one block, or the shortcode used
+ * alongside a block), and a shared/hardcoded id would mean
+ * document.querySelector() only ever finds the first one, silently
+ * leaving every other instance uninitialized.
  */
 function ws_search_render_widget( $atts ) {
 	$atts = shortcode_atts(
@@ -393,12 +399,13 @@ function ws_search_render_widget( $atts ) {
 		),
 		$atts
 	);
+	$container_id = wp_unique_id( 'ws-course-search-' );
 	ob_start();
 	?>
-	<div id="ws-course-search"></div>
+	<div id="<?php echo esc_attr( $container_id ); ?>"></div>
 	<script>
 		document.addEventListener('DOMContentLoaded', function () {
-			WSCourseSearch.init('#ws-course-search', {
+			WSCourseSearch.init('#<?php echo esc_js( $container_id ); ?>', {
 				defaultState: '<?php echo esc_js( $atts['default_state'] ); ?>',
 				defaultProfession: '<?php echo esc_js( $atts['default_profession'] ); ?>',
 			});

@@ -50,6 +50,19 @@
   const RECENT_KEY = "wsSearchRecent";
   const MAX_RECENT = 5;
 
+  // Every DOM id the widget generates for itself (the results list, recent
+  // searches, etc.) is derived from this root id — so it has to be unique
+  // whenever there's more than one instance on a page, even if whatever
+  // embedded the widget forgot to set one.
+  let autoIdCounter = 0;
+  function ensureUniqueId(root) {
+    if (!root.id) {
+      autoIdCounter += 1;
+      root.id = `ws-course-search-auto-${autoIdCounter}`;
+    }
+    return root.id;
+  }
+
   function withParams(endpoint, params) {
     const joiner = endpoint.includes("?") ? "&" : "?";
     return `${endpoint}${joiner}${params.toString()}`;
@@ -139,6 +152,11 @@
   class WSCourseSearch {
     constructor(root, options) {
       this.root = root;
+      // The PHP side (ws_search_render_widget()) already assigns each
+      // instance a wp_unique_id()'d container, but this stays independent
+      // of that — the widget's own multi-instance-safety shouldn't rely
+      // on the caller having done the right thing.
+      ensureUniqueId(this.root);
       this.options = options || {};
       this.abortController = null;
       this.semanticAbortController = null;
@@ -149,6 +167,11 @@
       this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
       this.professionSlug = this.options.defaultProfession || "nursing";
+      // Namespaced by container id so two instances on the same page never
+      // share "recent searches" or a remembered state — each is its own
+      // independent widget, per the multi-instance requirement.
+      this.storageKey = `${STORAGE_KEY}:${this.root.id}`;
+      this.recentKey = `${RECENT_KEY}:${this.root.id}`;
 
       this.context = this.loadContext();
       this.recent = this.loadRecent();
@@ -186,7 +209,7 @@
     // option — no hardcoded fallback state.
     loadContext() {
       try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+        const saved = JSON.parse(localStorage.getItem(this.storageKey) || "{}");
         return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
       } catch (e) {
         return { stateAbbv: this.options.defaultState || "" };
@@ -194,12 +217,12 @@
     }
 
     saveContext() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.context));
+      localStorage.setItem(this.storageKey, JSON.stringify(this.context));
     }
 
     loadRecent() {
       try {
-        return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+        return JSON.parse(localStorage.getItem(this.recentKey) || "[]");
       } catch (e) {
         return [];
       }
@@ -210,17 +233,22 @@
         0,
         MAX_RECENT
       );
-      localStorage.setItem(RECENT_KEY, JSON.stringify(this.recent));
+      localStorage.setItem(this.recentKey, JSON.stringify(this.recent));
       this.renderRecent();
     }
 
     clearRecent() {
       this.recent = [];
-      localStorage.removeItem(RECENT_KEY);
+      localStorage.removeItem(this.recentKey);
       this.renderRecent();
     }
 
     render() {
+      // Derived from the (unique) container id — otherwise every instance
+      // on the page would render the same hardcoded "ws-search-results"
+      // id, which is invalid HTML and makes aria-owns ambiguous once
+      // there's more than one.
+      const resultsId = `${this.root.id}-results`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
           <p class="ws-search__eyebrow"></p>
@@ -246,7 +274,7 @@
                   autocomplete="off"
                   role="combobox"
                   aria-expanded="false"
-                  aria-owns="ws-search-results"
+                  aria-owns="${resultsId}"
                 />
                 <button type="button" class="ws-search__clear" hidden>Clear</button>
               </div>
@@ -262,7 +290,7 @@
                 <div class="ws-search__recent-pills"></div>
               </div>
 
-              <ul class="ws-search__results" id="ws-search-results" hidden></ul>
+              <ul class="ws-search__results" id="${resultsId}" hidden></ul>
             </div>
           </div>
         </div>

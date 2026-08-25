@@ -57,14 +57,6 @@
   flex-wrap: wrap;
 }
 
-.ws-search__select-measure {
-  position: absolute;
-  visibility: hidden;
-  white-space: nowrap;
-  font-size: 15px;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
 .ws-search__state-wrap {
   position: relative;
   flex: 0 0 auto;
@@ -87,20 +79,68 @@
   height: 100%;
 }
 
-.ws-search__state {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
+/* Type-ahead field replacing the old native <select> — dropdowns felt
+   "old school" per design feedback, and this recognizes the state as the
+   visitor types instead of making them scroll a fixed list. */
+.ws-search__state-input {
+  width: 210px;
   height: 48px;
-  padding: 12px 34px 12px 38px;
+  padding: 12px 14px 12px 38px;
   border: 1px solid #d0d5dd;
   border-radius: 8px;
   font-size: 15px;
   box-sizing: border-box;
-  background: #fff
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    no-repeat right 14px center;
   color: #212121;
+}
+
+.ws-search__state-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(43, 87, 176, 0.15);
+}
+
+.ws-search__state-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 21;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ws-search__state-option + .ws-search__state-option {
+  border-top: 1px solid #f0f1f3;
+}
+
+.ws-search__state-option button {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: #212121;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-search__state-option button mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  padding: 0;
+}
+
+.ws-search__state-option:hover,
+.ws-search__state-option.is-active {
+  background: #f7f9fc;
 }
 
 .ws-search__input-wrap {
@@ -408,8 +448,8 @@
   .ws-search__state-wrap {
     width: 100%;
   }
-  .ws-search__state-wrap .ws-search__state {
-    width: 100% !important;
+  .ws-search__state-wrap .ws-search__state-input {
+    width: 100%;
   }
   .ws-search__input-wrap {
     width: 100%;

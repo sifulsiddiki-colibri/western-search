@@ -382,8 +382,9 @@ add_action( 'wp_enqueue_scripts', 'ws_search_enqueue_assets' );
  * Shared markup for both the [ws_course_search] shortcode and the
  * ws-course-search/search block — same widget, same output, so the two
  * delivery mechanisms can never drift apart. $atts/$attributes both use
- * the same 'default_state'/'default_profession' keys (shortcode_atts()
- * and the block's registered attributes agree on that shape).
+ * the same 'default_state'/'default_profession'/'hide_state_field' keys
+ * (shortcode_atts() and the block's registered attributes agree on that
+ * shape).
  *
  * Each call gets its own wp_unique_id()'d container — a page can have
  * several instances (e.g. more than one block, or the shortcode used
@@ -396,10 +397,20 @@ function ws_search_render_widget( $atts ) {
 		array(
 			'default_state'      => 'FL',
 			'default_profession' => 'nursing',
+			// On a page where the state is already established by context
+			// (e.g. a state-specific listings page), pass hide_state_field
+			// + default_state to skip asking the visitor again — the
+			// type-ahead field itself is never rendered.
+			'hide_state_field'   => false,
 		),
 		$atts
 	);
 	$container_id = wp_unique_id( 'ws-course-search-' );
+	// A block's boolean attribute arrives as a real PHP bool, but the
+	// shortcode's version (e.g. hide_state_field="true") arrives as a
+	// literal string — and PHP's truthiness would treat the *string*
+	// "false" as true. filter_var() normalizes either shape correctly.
+	$hide_state_field = filter_var( $atts['hide_state_field'], FILTER_VALIDATE_BOOLEAN );
 	ob_start();
 	?>
 	<div id="<?php echo esc_attr( $container_id ); ?>"></div>
@@ -408,6 +419,7 @@ function ws_search_render_widget( $atts ) {
 			WSCourseSearch.init('#<?php echo esc_js( $container_id ); ?>', {
 				defaultState: '<?php echo esc_js( $atts['default_state'] ); ?>',
 				defaultProfession: '<?php echo esc_js( $atts['default_profession'] ); ?>',
+				hideStateField: <?php echo $hide_state_field ? 'true' : 'false'; ?>,
 			});
 		});
 	</script>
@@ -444,6 +456,10 @@ function ws_search_register_block() {
 				'default_profession' => array(
 					'type'    => 'string',
 					'default' => 'nursing',
+				),
+				'hide_state_field'   => array(
+					'type'    => 'boolean',
+					'default' => false,
 				),
 			),
 			'render_callback' => 'ws_search_render_widget',

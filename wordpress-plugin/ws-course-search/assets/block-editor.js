@@ -39,6 +39,10 @@
 				type: 'string',
 				default: 'nursing',
 			},
+			hide_state_field: {
+				type: 'boolean',
+				default: false,
+			},
 		},
 		edit: function ( props ) {
 			var attributes = props.attributes;
@@ -66,6 +70,17 @@
 							onChange: function ( value ) {
 								setAttributes( { default_profession: value } );
 							},
+						} ),
+						el( components.ToggleControl, {
+							label: __( 'Hide state field', 'ws-course-search' ),
+							help: __(
+								'Use when this page already establishes the state (e.g. a state-specific listings page).',
+								'ws-course-search'
+							),
+							checked: attributes.hide_state_field,
+							onChange: function ( value ) {
+								setAttributes( { hide_state_field: value } );
+							},
 						} )
 					)
 				),
@@ -87,7 +102,10 @@
 						' — ' +
 						__( 'Profession:', 'ws-course-search' ) +
 						' ' +
-						attributes.default_profession
+						attributes.default_profession +
+						( attributes.hide_state_field
+							? ' — ' + __( 'state field hidden', 'ws-course-search' )
+							: '' )
 				)
 			);
 		},

@@ -46,6 +46,7 @@
   const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
+  const STATE_SUGGESTION_LIMIT = 8;
   const STORAGE_KEY = "wsSearchContext";
   const RECENT_KEY = "wsSearchRecent";
   const MAX_RECENT = 5;
@@ -167,6 +168,7 @@
       this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
       this.professionSlug = this.options.defaultProfession || "nursing";
+      this.states = []; // populated by loadLookups(); read by the state type-ahead before then is just empty.
       // Namespaced by container id so two instances on the same page never
       // share "recent searches" or a remembered state — each is its own
       // independent widget, per the multi-instance requirement.
@@ -249,6 +251,28 @@
       // id, which is invalid HTML and makes aria-owns ambiguous once
       // there's more than one.
       const resultsId = `${this.root.id}-results`;
+      const stateListId = `${this.root.id}-state-list`;
+      // Per the "state is already established by context" decision — a
+      // caller that already knows the state (e.g. a state-specific
+      // listings page) can pass hideStateField + defaultState and skip
+      // asking the visitor again.
+      const stateFieldHtml = this.options.hideStateField
+        ? ""
+        : `
+              <div class="ws-search__state-wrap">
+                <span class="ws-search__state-icon">${PIN_ICON}</span>
+                <input
+                  type="text"
+                  class="ws-search__state-input"
+                  placeholder="Select your state"
+                  aria-label="State"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-expanded="false"
+                  aria-owns="${stateListId}"
+                />
+                <ul class="ws-search__state-list" id="${stateListId}" hidden></ul>
+              </div>`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
           <p class="ws-search__eyebrow"></p>
@@ -257,13 +281,7 @@
 
           <div class="ws-search__panel">
             <div class="ws-search__controls">
-              <div class="ws-search__state-wrap">
-                <span class="ws-search__state-icon">${PIN_ICON}</span>
-                <select class="ws-search__state" aria-label="State">
-                  <option value="">Select your state</option>
-                </select>
-                <span class="ws-search__select-measure" aria-hidden="true"></span>
-              </div>
+              ${stateFieldHtml}
               <div class="ws-search__input-wrap">
                 <span class="ws-search__input-icon">${SEARCH_ICON}</span>
                 <input
@@ -296,8 +314,10 @@
         </div>
       `;
 
-      this.stateSelect = this.root.querySelector(".ws-search__state");
-      this.selectMeasureEl = this.root.querySelector(".ws-search__select-measure");
+      this.stateInput = this.root.querySelector(".ws-search__state-input");
+      this.stateListEl = this.root.querySelector(".ws-search__state-list");
+      this.stateActiveIndex = -1;
+      this.stateSuggestions = [];
       this.input = this.root.querySelector(".ws-search__input");
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
@@ -306,20 +326,8 @@
       this.recentEl = this.root.querySelector(".ws-search__recent");
       this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
-      this.stateSelect.addEventListener("change", () => {
-        this.context.stateAbbv = this.stateSelect.value;
-        this.saveContext();
-        this.sizeStateSelect();
-        if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
-        // A state that hasn't been searched in a while pays a real,
-        // several-second indexing cost (see ensureIndexed on the
-        // backend) before results come back — show that a search is in
-        // flight instead of leaving the previous state's stale results
-        // sitting there looking frozen.
-        if (this.input.value.trim()) this.showLoading();
-        this.runSearch();
-      });
-      this.sizeStateSelect();
+      if (this.stateInput) this.wireStateInput();
+
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
       this.input.addEventListener("focus", () => {
@@ -335,13 +343,138 @@
         this.runSearch(false, true);
       });
       document.addEventListener("click", (e) => {
-        if (!this.root.contains(e.target)) this.closeResults();
+        if (!this.root.contains(e.target)) {
+          this.closeResults();
+          this.closeStateSuggestions();
+        }
       });
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !this.resultsEl.hidden) this.closeResults();
+        if (e.key !== "Escape") return;
+        if (!this.resultsEl.hidden) this.closeResults();
+        if (this.stateListEl && !this.stateListEl.hidden) this.closeStateSuggestions();
       });
 
       this.renderRecent();
+    }
+
+    // Selecting a state used to be a <select> "change" event — same
+    // downstream effect (save context, warm the state's catalog, re-run
+    // the current search), just triggered from picking a type-ahead
+    // suggestion instead. Saru: "dropdown for states is a bit old school."
+    selectState(state) {
+      this.context.stateAbbv = state.stateAbbv;
+      this.stateInput.value = state.stateFullName;
+      this.saveContext();
+      this.closeStateSuggestions();
+      this.warmState(state.stateAbbv);
+      // A state that hasn't been searched in a while pays a real,
+      // several-second indexing cost (see ensureIndexed on the backend)
+      // before results come back — show that a search is in flight
+      // instead of leaving the previous state's stale results sitting
+      // there looking frozen.
+      if (this.input.value.trim()) this.showLoading();
+      this.runSearch();
+    }
+
+    wireStateInput() {
+      this.stateInput.addEventListener("input", () => {
+        this.renderStateSuggestions(this.stateInput.value.trim());
+      });
+      this.stateInput.addEventListener("focus", () => {
+        this.renderStateSuggestions(this.stateInput.value.trim());
+      });
+      this.stateInput.addEventListener("blur", () => {
+        // Give a click on a suggestion a chance to register before
+        // closing/reverting — a blur fires before that click's own
+        // handler otherwise.
+        setTimeout(() => this.revertUncommittedStateText(), 150);
+      });
+      this.stateInput.addEventListener("keydown", (e) => this.onStateKeyDown(e));
+    }
+
+    // A combobox shouldn't leave the field showing text that doesn't
+    // correspond to an actual selected state — revert to whatever the
+    // last confirmed selection was (or blank) if the visitor typed
+    // something and clicked away without picking a suggestion.
+    revertUncommittedStateText() {
+      const current = this.states.find((s) => s.stateAbbv === this.context.stateAbbv);
+      this.stateInput.value = current ? current.stateFullName : "";
+      this.closeStateSuggestions();
+    }
+
+    renderStateSuggestions(query) {
+      const q = query.toLowerCase();
+      const matches = !q
+        ? this.states
+        : this.states.filter(
+            (s) =>
+              s.stateFullName.toLowerCase().includes(q) ||
+              s.stateAbbv.toLowerCase().startsWith(q)
+          );
+
+      this.stateSuggestions = matches.slice(0, STATE_SUGGESTION_LIMIT);
+      this.stateActiveIndex = -1;
+
+      if (!this.stateSuggestions.length) {
+        this.closeStateSuggestions();
+        return;
+      }
+
+      this.stateListEl.innerHTML = this.stateSuggestions
+        .map(
+          (s, i) => `
+            <li class="ws-search__state-option" data-index="${i}">
+              <button type="button">${highlightMatch(s.stateFullName, query)}</button>
+            </li>
+          `
+        )
+        .join("");
+      this.stateListEl.querySelectorAll(".ws-search__state-option").forEach((li, i) => {
+        li.querySelector("button").addEventListener("click", () => {
+          this.selectState(this.stateSuggestions[i]);
+        });
+      });
+      this.stateListEl.hidden = false;
+      this.stateInput.setAttribute("aria-expanded", "true");
+    }
+
+    closeStateSuggestions() {
+      if (!this.stateListEl) return;
+      this.stateListEl.hidden = true;
+      this.stateListEl.innerHTML = "";
+      this.stateActiveIndex = -1;
+      this.stateInput.setAttribute("aria-expanded", "false");
+    }
+
+    onStateKeyDown(e) {
+      if (!this.stateSuggestions.length) return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        this.stateActiveIndex = Math.min(
+          this.stateActiveIndex + 1,
+          this.stateSuggestions.length - 1
+        );
+        this.updateStateActiveOption();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        this.stateActiveIndex = Math.max(this.stateActiveIndex - 1, 0);
+        this.updateStateActiveOption();
+      } else if (e.key === "Enter") {
+        if (this.stateActiveIndex >= 0 && this.stateSuggestions[this.stateActiveIndex]) {
+          e.preventDefault();
+          this.selectState(this.stateSuggestions[this.stateActiveIndex]);
+        }
+      }
+    }
+
+    updateStateActiveOption() {
+      const items = this.stateListEl.querySelectorAll(".ws-search__state-option");
+      items.forEach((item, i) =>
+        item.classList.toggle("is-active", i === this.stateActiveIndex)
+      );
+      const active = items[this.stateActiveIndex];
+      if (active) active.scrollIntoView({ block: "nearest" });
     }
 
     renderRecent() {
@@ -378,36 +511,21 @@
           (r) => r.json()
         );
 
-        states
-          .sort((a, b) => a.stateFullName.localeCompare(b.stateFullName))
-          .forEach((s) => {
-            const opt = document.createElement("option");
-            opt.value = s.stateAbbv;
-            opt.textContent = s.stateFullName;
-            this.stateSelect.appendChild(opt);
-          });
+        this.states = states.sort((a, b) => a.stateFullName.localeCompare(b.stateFullName));
 
         this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
-        if (this.context.stateAbbv)
-          this.stateSelect.value = this.context.stateAbbv;
-        this.sizeStateSelect();
+        // Pre-fill from a prior visit (localStorage) or an explicit
+        // defaultState option, same as before — just resolving the
+        // abbreviation to a display name for the text field instead of
+        // setting a <select>'s value.
+        if (this.context.stateAbbv && this.stateInput) {
+          const match = this.states.find((s) => s.stateAbbv === this.context.stateAbbv);
+          this.stateInput.value = match ? match.stateFullName : this.context.stateAbbv;
+        }
       } catch (err) {
         console.error("WSCourseSearch: failed to load lookups", err);
       }
-    }
-
-    // Native <select> elements size to their widest *option*, not the
-    // currently selected one, so "Florida" and "District of Columbia"
-    // otherwise render at the same fixed width. Measuring the selected
-    // option's text in a hidden span and applying that as an explicit
-    // width lets the field shrink/grow with the actual selection.
-    sizeStateSelect() {
-      const selected = this.stateSelect.options[this.stateSelect.selectedIndex];
-      this.selectMeasureEl.textContent = selected ? selected.textContent : "";
-      const textWidth = this.selectMeasureEl.offsetWidth;
-      const CHROME_WIDTH = 38 + 34 + 2; // pin-icon padding-left + padding-right (incl. arrow) + border
-      this.stateSelect.style.width = `${textWidth + CHROME_WIDTH}px`;
     }
 
     onInput() {

@@ -24,6 +24,42 @@ headless browser available) — verified instead by computing real embeddings
 through the same model via Node and feeding them through the actual PHP
 endpoints, which is everything this plugin's own code is responsible for.
 
+## Hand-off event: `ws-search:results`
+
+The integration boundary with Colibri's team (CL2 listings filtering) — see
+the architecture doc's "surface-level integration" decision. The widget
+never talks to CL2 directly; it only fires this event, and whatever's
+downstream (a listener added by Ben/Saru's team) decides what to do with
+the product codes.
+
+Fired on the widget's root container element (the same element passed to
+`WSCourseSearch.init(selector, ...)`) every time a search completes and
+results render — including a zero-result render, in which case
+`productCodes` is `[]`. `bubbles: true`, so a page-level listener can also
+attach to `document` and check `event.target` to tell instances apart when
+more than one widget is on the page.
+
+```js
+document.getElementById('ws-course-search-<id>').addEventListener(
+  'ws-search:results',
+  (e) => {
+    const { query, stateAbbv, productCodes, ts } = e.detail;
+    // query: the search phrase, e.g. "cardiac"
+    // stateAbbv: 2-letter state code the search ran against, e.g. "FL"
+    //            (empty string if no state was selected yet)
+    // productCodes: string[] — the matched products' productId values,
+    //               in the same order they're rendered
+    // ts: number — Date.now() at fire time
+  }
+);
+```
+
+Deliberately **not** included in the payload: rendered HTML, full product
+objects, or anything beyond the codes needed to filter — per the "post
+product codes, not a search phrase or query string" decision, the payload
+is the thin, stable contract; everything else CL2 needs about a product it
+already has by `productId`.
+
 ## Why no external search service
 
 Meilisearch and a fast embeddings API were both evaluated and ruled out for

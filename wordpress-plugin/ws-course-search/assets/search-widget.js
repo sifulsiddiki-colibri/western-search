@@ -722,6 +722,11 @@
 
     renderResults(query) {
       this.activeIndex = -1;
+      // Fired for a zero-result render too (with an empty productCodes) —
+      // a listener that filtered CL2 down to a previous search's matches
+      // needs to hear about a since-typed query matching nothing, not just
+      // successful ones.
+      this.emitResults(query);
 
       if (!this.lastResults.length) {
         this.showMessage(`No courses found for "${escapeHtml(query)}".`);
@@ -789,6 +794,24 @@
 
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
+    }
+
+    // Lets anything embedding the widget (analytics, other WP blocks on the
+    // same page) react to a completed search without reaching into the
+    // widget's internals — fired from the root element so multiple
+    // instances on one page stay distinguishable via event.target.
+    emitResults(query) {
+      this.root.dispatchEvent(
+        new CustomEvent("ws-search:results", {
+          bubbles: true,
+          detail: {
+            query,
+            stateAbbv: this.context.stateAbbv,
+            productCodes: this.lastResults.map((p) => p.productId),
+            ts: Date.now(),
+          },
+        })
+      );
     }
 
     showMessage(message) {

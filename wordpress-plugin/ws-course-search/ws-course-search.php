@@ -331,20 +331,38 @@ add_action( 'admin_enqueue_scripts', 'ws_search_enqueue_admin_assets' );
 // Asset registration
 // ---------------------------------------------------------------------------
 
-function ws_search_enqueue_assets() {
-	wp_enqueue_style(
+// Registered on `init` (fires in both the front end and wp-admin) so the
+// block editor can reference the 'ws-course-search' style/script handles
+// via register_block_type()'s 'style'/'script' args below — those just
+// need the handles registered, not necessarily enqueued yet. Actual
+// front-end enqueueing still happens in ws_search_enqueue_assets().
+function ws_search_register_assets() {
+	wp_register_style(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
 		'4.0.0'
 	);
-	wp_enqueue_script(
+	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
 		'4.0.0',
 		true
 	);
+	wp_register_script(
+		'ws-course-search-block-editor',
+		plugins_url( 'assets/block-editor.js', __FILE__ ),
+		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
+		'4.0.0',
+		true
+	);
+}
+add_action( 'init', 'ws_search_register_assets' );
+
+function ws_search_enqueue_assets() {
+	wp_enqueue_style( 'ws-course-search' );
+	wp_enqueue_script( 'ws-course-search' );
 	wp_localize_script(
 		'ws-course-search',
 		'wsSearchConfig',
@@ -361,11 +379,13 @@ function ws_search_enqueue_assets() {
 add_action( 'wp_enqueue_scripts', 'ws_search_enqueue_assets' );
 
 /**
- * [ws_course_search] — drop this shortcode into the homepage and product
- * listing page templates (or directly in the block editor) per the "add
- * site wide search to homepage and within product listing pages" guidance.
+ * Shared markup for both the [ws_course_search] shortcode and the
+ * ws-course-search/search block — same widget, same output, so the two
+ * delivery mechanisms can never drift apart. $atts/$attributes both use
+ * the same 'default_state'/'default_profession' keys (shortcode_atts()
+ * and the block's registered attributes agree on that shape).
  */
-function ws_search_shortcode( $atts ) {
+function ws_search_render_widget( $atts ) {
 	$atts = shortcode_atts(
 		array(
 			'default_state'      => 'FL',
@@ -387,7 +407,45 @@ function ws_search_shortcode( $atts ) {
 	<?php
 	return ob_get_clean();
 }
-add_shortcode( 'ws_course_search', 'ws_search_shortcode' );
+
+/**
+ * [ws_course_search] — drop this shortcode into the homepage and product
+ * listing page templates (or directly in the block editor) per the "add
+ * site wide search to homepage and within product listing pages" guidance.
+ * Kept working alongside the ws-course-search/search block below — the
+ * block is the required delivery format, but existing pages using the
+ * shortcode shouldn't break.
+ */
+add_shortcode( 'ws_course_search', 'ws_search_render_widget' );
+
+/**
+ * ws-course-search/search — Gutenberg block wrapping the same widget the
+ * shortcode renders. A dynamic block (save() returns null client-side —
+ * see assets/block-editor.js) so ws_search_render_widget() is the one and
+ * only place the markup is generated, on both save and every render.
+ */
+function ws_search_register_block() {
+	register_block_type(
+		'ws-course-search/search',
+		array(
+			'api_version'     => 3,
+			'attributes'      => array(
+				'default_state'      => array(
+					'type'    => 'string',
+					'default' => 'FL',
+				),
+				'default_profession' => array(
+					'type'    => 'string',
+					'default' => 'nursing',
+				),
+			),
+			'render_callback' => 'ws_search_render_widget',
+			'editor_script'   => 'ws-course-search-block-editor',
+			'style'           => 'ws-course-search',
+		)
+	);
+}
+add_action( 'init', 'ws_search_register_block' );
 
 // ---------------------------------------------------------------------------
 // Marketing API

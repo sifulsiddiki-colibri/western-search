@@ -395,7 +395,12 @@ add_action( 'wp_enqueue_scripts', 'ws_search_enqueue_assets' );
 function ws_search_render_widget( $atts ) {
 	$atts = shortcode_atts(
 		array(
-			'default_state'      => 'FL',
+			// Must default to empty, not a real state — the widget always
+			// starts on "Select your state" unless a page explicitly
+			// establishes one (e.g. a state-specific listings page passing
+			// this + hide_state_field). See loadContext() in
+			// assets/search-widget.js.
+			'default_state'      => '',
 			'default_profession' => 'nursing',
 			// On a page where the state is already established by context
 			// (e.g. a state-specific listings page), pass hide_state_field
@@ -451,7 +456,7 @@ function ws_search_register_block() {
 			'attributes'      => array(
 				'default_state'      => array(
 					'type'    => 'string',
-					'default' => 'FL',
+					'default' => '',
 				),
 				'default_profession' => array(
 					'type'    => 'string',

@@ -124,8 +124,12 @@ fast keyword/typo matching only with no extra download for visitors.
    creates the `ws_catalog`/`ws_embeddings` tables and schedules the
    background pre-warm sweep.
 3. Add `[ws_course_search]` to the homepage and product listing page
-   templates (or directly in the block editor as a Shortcode block).
-   Optional attribute: `[ws_course_search default_state="FL"]`.
+   templates, or insert the **WS Course Search** block directly in the
+   block editor — both render the same widget. Leave `default_state` unset
+   so the widget starts on "Select your state"; only pass it (with
+   `hide_state_field`) on a page that already establishes the state, e.g.
+   `[ws_course_search default_state="FL" hide_state_field="true"]` on an
+   FL-specific listings page.
 4. Once real visitor traffic (or a manual state search) has populated the
    catalog, go to **Settings → WS Course Search** and click "Refresh search
    embeddings" to turn on semantic search. Re-run this after any catalog

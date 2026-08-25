@@ -33,7 +33,7 @@
 		attributes: {
 			default_state: {
 				type: 'string',
-				default: 'FL',
+				default: '',
 			},
 			default_profession: {
 				type: 'string',

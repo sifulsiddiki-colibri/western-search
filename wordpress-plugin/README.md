@@ -33,11 +33,17 @@ model via Node and feeding them through the actual PHP endpoints, which is
 everything this plugin's own code is responsible for.
 
 The `ws-search:results` hand-off event and `ws_search_log_term` capture
-(below) are newer and were verified with an automated harness that loads
-this actual `assets/search-widget.js` into `jsdom` and drives it — real
-code, real DOM, real fetch payloads — rather than the live WordPress
-instance above. Re-running them through the same live-instance flow before
-Wednesday is still worth doing.
+(below) were first checked with a `jsdom` harness (real widget code, fake
+DOM), then **re-verified end-to-end with headless Chrome (Puppeteer)
+against the same real WordPress instance** as above: a real search for
+"cardiac"/FL fires `ws-search:results` with the real matched `productId`
+in `productCodes`; clicking that result navigates the browser to the exact
+real PDP URL; clicking "Search" with nothing selected navigates to
+`test.westernschools.com/nursing/view-all/` with `searchPhrase`/`state` in
+the query string and no product codes; and the `ws_search_log_term` POST
+this triggers actually lands a row in `wp_ws_search_log` (checked by
+querying the SQLite file directly) with the correct `query`/`state_abbv`/
+`result_count`.
 
 ## Front end: block, multi-instance, state type-ahead
 

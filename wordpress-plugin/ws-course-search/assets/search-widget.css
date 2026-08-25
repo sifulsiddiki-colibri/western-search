@@ -11,6 +11,7 @@
 .ws-search-hero {
   position: relative;
   max-width: 900px;
+  margin: 0 auto;
   padding: 40px 32px;
   border-radius: 16px;
   background: linear-gradient(180deg, #eaf1fc 0%, #e3ecfb 100%);

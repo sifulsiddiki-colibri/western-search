@@ -378,7 +378,7 @@
       const selected = this.stateSelect.options[this.stateSelect.selectedIndex];
       this.selectMeasureEl.textContent = selected ? selected.textContent : "";
       const textWidth = this.selectMeasureEl.offsetWidth;
-      const CHROME_WIDTH = 38 + 34 + 2; // pin-icon padding-left + padding-right (incl. arrow) + border
+      const CHROME_WIDTH = 42 + 30; // pin-icon padding-left + padding-right (incl. arrow) — no border, chrome is on the pill wrap now
       this.stateSelect.style.width = `${textWidth + CHROME_WIDTH}px`;
     }
 
@@ -402,11 +402,25 @@
     }
 
     // Navigates to the "view all results" page instead of expanding the
-    // dropdown further — only when running under WordPress with a
-    // configured viewAllBase. Returns false (does nothing) otherwise, so
-    // callers can fall through to the existing inline-expand behavior.
+    // dropdown further. Under WordPress this goes to WP_CONFIG.viewAllBase
+    // (the WP_VIEW_ALL_BASE-configured page). Locally (this repo's Node
+    // prototype has no such WP config), options.viewAllPageUrl points at
+    // view-all.html instead, using a flat query string rather than the
+    // WP path shape buildViewAllUrl produces. Returns false (does nothing)
+    // if neither is configured, so callers can fall through to the
+    // existing inline-expand behavior.
     goToViewAll(query) {
-      if (!WP_CONFIG || !WP_CONFIG.viewAllBase || !query) return false;
+      if (!query) return false;
+
+      if (this.options.viewAllPageUrl) {
+        this.saveRecent(query);
+        const params = new URLSearchParams({ searchPhrase: query });
+        if (this.context.stateAbbv) params.set("state", this.context.stateAbbv);
+        window.location.href = `${this.options.viewAllPageUrl}?${params.toString()}`;
+        return true;
+      }
+
+      if (!WP_CONFIG || !WP_CONFIG.viewAllBase) return false;
       this.saveRecent(query);
       window.location.href = buildViewAllUrl(
         WP_CONFIG.viewAllBase,

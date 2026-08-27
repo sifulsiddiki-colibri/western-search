@@ -1,49 +1,27 @@
 /*
   Palette sampled directly from the reference screenshots:
-  brand blue #2B57B0, light-blue pill #DFE6F3, heading ink #212121,
+  brand blue #2B57B0, accent blue #2358DD (search bar v2 pill only —
+  button/pin/focus rings), light-blue pill #DFE6F3, heading ink #212121,
   mandatory badge #FAECE1 / #B4794F, elective badge #F2F3F4 / #6B7280.
-
-  Heading font is a placeholder (Poppins) standing in for Western Schools'
-  actual brand typeface — swap once design confirms it.
 */
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap");
 
 .ws-search-hero {
   position: relative;
   max-width: 900px;
   margin: 0 auto;
-  padding: 40px 32px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #eaf1fc 0%, #e3ecfb 100%);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: #212121;
   box-sizing: border-box;
 }
 
 .ws-search__eyebrow {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #2b57b0;
   min-height: 1em;
-}
-
-.ws-search__heading {
-  margin: 0 0 12px;
-  font-family: "Poppins", system-ui, sans-serif;
-  font-size: 34px;
-  font-weight: 700;
-  color: #212121;
-}
-
-.ws-search__subheading {
-  margin: 0 0 24px;
-  max-width: 560px;
-  font-size: 15px;
-  line-height: 1.5;
-  color: #4b5563;
 }
 
 .ws-search__panel {
@@ -76,10 +54,10 @@
 
 .ws-search__state-icon {
   position: absolute;
-  left: 18px;
-  width: 16px;
-  height: 16px;
-  color: #2b57b0;
+  left: 20px;
+  width: 18px;
+  height: 18px;
+  color: #2358dd;
   display: flex;
   pointer-events: none;
 }
@@ -91,9 +69,9 @@
 
 .ws-search__state-chevron {
   position: absolute;
-  right: 16px;
-  width: 10px;
-  height: 10px;
+  right: 18px;
+  width: 12px;
+  height: 12px;
   color: #6b7280;
   display: flex;
   pointer-events: none;
@@ -108,13 +86,13 @@
    "old school" per design feedback, and this recognizes the state as the
    visitor types instead of making them scroll a fixed list. */
 .ws-search__state-input {
-  width: 190px;
-  height: 56px;
-  padding: 12px 30px 12px 42px;
+  width: 200px;
+  height: 64px;
+  padding: 14px 36px 14px 48px;
   border: none;
   border-radius: 0;
   background: transparent;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   box-sizing: border-box;
   color: #212121;
@@ -122,7 +100,7 @@
 
 .ws-search__state-input:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(43, 87, 176, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(35, 88, 221, 0.25);
 }
 
 .ws-search__state-list {
@@ -180,9 +158,9 @@
 
 .ws-search__input-icon {
   position: absolute;
-  left: 18px;
-  width: 18px;
-  height: 18px;
+  left: 20px;
+  width: 20px;
+  height: 20px;
   color: #6b7280;
   display: flex;
   pointer-events: none;
@@ -195,18 +173,21 @@
 
 .ws-search__input {
   width: 100%;
-  height: 56px;
-  padding: 12px 70px 12px 46px;
+  height: 64px;
+  padding: 14px 74px 14px 52px;
   border: none;
   border-radius: 0;
-  font-size: 16px;
+  font-size: 17px;
   box-sizing: border-box;
   background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ws-search__input:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(43, 87, 176, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(35, 88, 221, 0.25);
 }
 
 .ws-search__clear {
@@ -232,28 +213,28 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 56px;
-  padding: 12px 32px;
+  gap: 10px;
+  height: 64px;
+  padding: 16px 40px;
   border: none;
   border-radius: 0;
-  background: #2b57b0;
+  background: #2358dd;
   color: #fff;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   cursor: pointer;
   box-sizing: border-box;
 }
 
 .ws-search__submit svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .ws-search__submit:hover {
-  background: #234a99;
+  background: #1a46b8;
 }
 
 .is-loading .ws-search__submit {
@@ -465,13 +446,6 @@
 }
 
 @media (max-width: 640px) {
-  .ws-search-hero {
-    padding: 28px 20px;
-    border-radius: 12px;
-  }
-  .ws-search__heading {
-    font-size: 24px;
-  }
   .ws-search__controls {
     flex-direction: column;
     align-items: stretch;
@@ -489,7 +463,7 @@
   }
   .ws-search__state-wrap .ws-search__state-input {
     width: 100%;
-    height: 48px;
+    height: 52px;
   }
   .ws-search__input-wrap {
     flex: 1 1 auto;
@@ -499,11 +473,11 @@
     border-radius: 8px;
   }
   .ws-search__input-wrap .ws-search__input {
-    height: 48px;
+    height: 52px;
   }
   .ws-search__submit {
     width: 100%;
-    height: 48px;
+    height: 52px;
     border-radius: 8px;
   }
 }

@@ -224,8 +224,6 @@
       this.root.innerHTML = `
         <div class="ws-search-hero">
           <p class="ws-search__eyebrow"></p>
-          <h2 class="ws-search__heading">What are you looking to learn today?</h2>
-          <p class="ws-search__subheading">Search our full library of board-approved courses, bundles, and membership plans.</p>
 
           <div class="ws-search__panel">
             <div class="ws-search__controls">

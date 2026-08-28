@@ -267,15 +267,16 @@ a {
   font-weight: 600;
 }
 
-/* Fixed width, not the JS-measured auto-fit width sizeStateSelect() sets
-   inline — that JS write only beats a non-!important stylesheet rule,
-   and the <640px media query's own width:100% is !important, so this
-   has to match its !important + higher specificity to win at every
-   viewport, which means giving up the auto-fit-to-text behavior here. */
 .ws-search-panel .ws-search__state-wrap .ws-search__state {
-  width: 96px !important;
   height: 34px;
-  padding: 0 20px 0 26px;
+  padding: 0 24px 0 26px;
+  /* search-widget.css's own chevron is positioned "right 18px", tuned
+     for the hero pill's much wider 34px right padding — at this bar's
+     smaller 24px padding that put the icon 6px inside the text's own
+     content box, covering the state name's last letter. Moving it in
+     to "right 6px" keeps it clear of the (now correctly-sized, see
+     sizeStateSelect() in search-widget.js) text next to it. */
+  background-position: right 6px center;
 }
 
 .ws-search-panel .ws-search__state-icon {

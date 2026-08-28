@@ -6,6 +6,7 @@
     <title>View All Nursing Continuing Education Courses — Western Schools</title>
     <link rel="stylesheet" href="css/site-header.css" />
     <link rel="stylesheet" href="css/view-all.css" />
+    <link rel="stylesheet" href="css/search-widget.css" />
   </head>
   <body>
     <div class="ws-demo-tag">
@@ -16,6 +17,24 @@
 
     <header class="ws-site-header">
       <div class="ws-topbar-utility">
+        <div class="ws-search-anchor">
+          <button
+            type="button"
+            class="ws-search-toggle"
+            id="ws-search-toggle"
+            aria-label="Search courses"
+            aria-expanded="false"
+            aria-controls="ws-search-panel"
+          >
+            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+          <div class="ws-search-panel" id="ws-search-panel" hidden>
+            <div class="ws-search-panel__inner">
+              <div id="ws-course-search"></div>
+            </div>
+          </div>
+        </div>
+        <div class="ws-search-backdrop" id="ws-search-backdrop" hidden></div>
         <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
         <a class="ws-faq" href="#">FAQs</a>
       </div>
@@ -125,6 +144,63 @@
       </div>
     </main>
 
+    <script src="js/search-widget.js"></script>
     <script src="js/view-all.js"></script>
+    <script>
+      // Keep the header search popup's state in sync with the state this
+      // results page is already showing — the URL's ?state= is the
+      // authoritative source for what this specific page is displaying,
+      // and should win over whatever's stale in wsSearchContext from an
+      // earlier, unrelated visit (e.g. someone arriving via a shared
+      // link rather than through the homepage search first).
+      const viewAllState = new URLSearchParams(window.location.search).get(
+        "state"
+      );
+      if (viewAllState) {
+        localStorage.setItem(
+          "wsSearchContext",
+          JSON.stringify({ stateAbbv: viewAllState })
+        );
+      }
+
+      const search = WSCourseSearch.init("#ws-course-search", {
+        viewAllPageUrl: "view-all.html",
+      });
+
+      const toggleBtn = document.getElementById("ws-search-toggle");
+      const panel = document.getElementById("ws-search-panel");
+      const backdrop = document.getElementById("ws-search-backdrop");
+
+      function openPanel() {
+        panel.hidden = false;
+        backdrop.hidden = false;
+        toggleBtn.classList.add("is-active");
+        toggleBtn.setAttribute("aria-expanded", "true");
+        search.sizeStateSelect();
+        const input = panel.querySelector(".ws-search__input");
+        if (input) input.focus();
+      }
+
+      function closePanel() {
+        panel.hidden = true;
+        backdrop.hidden = true;
+        toggleBtn.classList.remove("is-active");
+        toggleBtn.setAttribute("aria-expanded", "false");
+      }
+
+      toggleBtn.addEventListener("click", () => {
+        if (panel.hidden) openPanel();
+        else closePanel();
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!panel.hidden && !e.target.closest(".ws-search-anchor")) {
+          closePanel();
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !panel.hidden) closePanel();
+      });
+    </script>
   </body>
 </html>

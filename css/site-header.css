@@ -39,14 +39,56 @@
   gap: 18px;
 }
 
-/* Just a plain wrapper now — the search popup (styled in home.css) is
-   position:fixed and centered on the viewport, not laid out inline
-   here. It stays nested in this DOM anchor only so the outside-click-
-   closes check in index.html's script (e.target.closest(".ws-search-
+/* Just a plain wrapper now — the search popup below is position:fixed
+   and centered on the viewport, not laid out inline here. It stays
+   nested in this DOM anchor only so the outside-click-closes check in
+   index.html's/view-all.html's script (e.target.closest(".ws-search-
    anchor")) can tell a click inside the popup from a click outside it. */
 .ws-search-anchor {
   display: flex;
   align-items: center;
+}
+
+/* Search popup — hidden until the header magnifying glass is toggled.
+   A centered modal showing the full-size search bar (matching the
+   "search bar v2" mockup's own proportions/labeling), over a dimmed
+   backdrop — not an inline flyout. The bar/results inside it are the
+   widget's own default styling from search-widget.css, unmodified;
+   this file only supplies the popup chrome around it. Lives here
+   (shared by index.html and view-all.html) rather than in home.css,
+   since it's the header's search trigger, not homepage-specific. */
+.ws-search-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 90;
+}
+
+.ws-search-backdrop[hidden] {
+  display: none;
+}
+
+.ws-search-panel {
+  position: fixed;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+  padding: 28px;
+  z-index: 100;
+}
+
+.ws-search-panel[hidden] {
+  display: none;
+}
+
+.ws-search-panel__inner {
+  width: 100%;
 }
 
 .ws-topbar {

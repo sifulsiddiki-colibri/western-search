@@ -1,0 +1,127 @@
+/*
+  Shared Western Schools site header/topbar — used by index.html and
+  view-all.html so both recreations stay visually identical instead of
+  drifting. Logo is the real site-logo.svg (downloaded from
+  westernschools.com); colors are pixel-sampled/computed-style-read
+  directly from a live screenshot of westernschools.com (2026-08-28):
+  brand blue #1758B6 (nav links, Sign In border, Continue buttons),
+  heading ink #4F4F4F. The search icon next to the cart is a demo
+  addition — the real site has no such icon there.
+*/
+
+.ws-demo-tag {
+  padding: 8px 20px;
+  background: #212121;
+  color: #d7dce6;
+  font-size: 12px;
+  text-align: center;
+}
+
+.ws-site-header {
+  border-bottom: 1px solid #eceef1;
+}
+
+.ws-topbar {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.ws-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+
+.ws-logo__mark {
+  width: 110px;
+  height: auto;
+  flex: 0 0 auto;
+}
+
+.ws-nav {
+  display: flex;
+  gap: 28px;
+  flex: 1 1 auto;
+}
+
+.ws-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: #1758b6;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.ws-nav a svg {
+  width: 9px;
+  height: 6px;
+}
+
+.ws-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex: 0 0 auto;
+}
+
+.ws-call {
+  font-size: 13px;
+  font-weight: 700;
+  color: #212121;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ws-faq {
+  font-size: 13px;
+  font-weight: 700;
+  color: #212121;
+  text-decoration: none;
+}
+
+.ws-search-toggle,
+.ws-cart {
+  border: none;
+  background: none;
+  color: #1758b6;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+}
+
+.ws-search-toggle svg,
+.ws-cart svg {
+  width: 22px;
+  height: 20px;
+}
+
+
+.ws-signin {
+  padding: 9px 20px;
+  border: 1.5px solid #1758b6;
+  border-radius: 6px;
+  color: #1758b6;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .ws-topbar {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .ws-nav {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+}

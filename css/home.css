@@ -1,0 +1,233 @@
+/*
+  Homepage recreation — matched to a live screenshot of
+  westernschools.com (2026-08-28), not invented: hero card + photo,
+  "Expand your expertise..." heading, and the two-panel discovery section
+  all mirror the real page's layout, copy, and colors (brand blue
+  #1758B6, heading ink #4F4F4F, peach panel #FDE9D6, pale-yellow panel
+  #FEF3D2 — all pixel-sampled from that screenshot). The search
+  widget itself (css/search-widget.css) still supplies the "hero search
+  box" look inside the toggled panel; this file only styles the page
+  shell around it. Sections of the real page below the discovery panel
+  (the "joined Elite Learning" / "quality CE" content blocks) weren't
+  rebuilt — out of scope for a search-functionality demo.
+*/
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap");
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #212121;
+  background: #fff;
+}
+
+a {
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Hero — white card overlapping a full-width photo, per the real page.   */
+/* ---------------------------------------------------------------------- */
+
+.ws-home-hero {
+  position: relative;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+
+.ws-home-hero__photo {
+  position: absolute;
+  inset: 0 32px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 4px;
+}
+
+.ws-home-hero__card {
+  position: relative;
+  max-width: 620px;
+  margin: 40px 0 40px 32px;
+  padding: 48px;
+  background: #fff;
+}
+
+.ws-home-hero__heading {
+  margin: 0 0 16px;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: #4f4f4f;
+}
+
+.ws-home-hero__sub {
+  margin: 0 0 24px;
+  font-size: 16px;
+  color: #4b5563;
+}
+
+.ws-home-hero__cta {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  padding: 0 24px;
+  border: none;
+  border-radius: 2px;
+  background: #2d5c86;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ws-home-hero__cta:hover {
+  background: #244a6b;
+}
+
+@media (max-width: 800px) {
+  .ws-home-hero__photo {
+    display: none;
+  }
+  .ws-home-hero__card {
+    margin: 0;
+    max-width: none;
+    padding: 32px 24px;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* "Expand your expertise..." heading + two-panel discovery section       */
+/* ---------------------------------------------------------------------- */
+
+.ws-expand-heading {
+  margin: 0;
+  padding: 40px 32px 32px;
+  text-align: center;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 26px;
+  color: #4f4f4f;
+}
+
+.ws-discover {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.ws-discover__panel {
+  padding: 48px 32px;
+  text-align: center;
+}
+
+.ws-discover__panel--specialty {
+  background: #fde9d6;
+}
+
+.ws-discover__panel--state {
+  background: #fef3d2;
+}
+
+.ws-discover__panel h3 {
+  margin: 0 0 16px;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  color: #4f4f4f;
+}
+
+.ws-discover__panel p {
+  margin: 0 auto 24px;
+  max-width: 380px;
+  font-size: 15px;
+  color: #4b5563;
+}
+
+.ws-discover__select {
+  display: block;
+  width: 100%;
+  max-width: 350px;
+  margin: 0 auto 12px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #9aa1ab;
+  border-radius: 2px;
+  background: #fff;
+  font-size: 14px;
+  color: #212121;
+}
+
+.ws-discover__continue {
+  display: block;
+  width: 100%;
+  max-width: 350px;
+  margin: 0 auto;
+  height: 42px;
+  border: none;
+  border-radius: 2px;
+  background: #1758b6;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.ws-discover__continue:hover {
+  background: #12488f;
+}
+
+@media (max-width: 800px) {
+  .ws-discover {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Search panel — hidden until the header magnifying glass is toggled.    */
+/* Sits between the header and the hero, in normal page flow (not an      */
+/* overlay), so opening it pushes the rest of the page down.              */
+/* ---------------------------------------------------------------------- */
+
+.ws-search-panel {
+  border-bottom: 1px solid #e2e5ea;
+  /* Same blue gradient search-widget.css gives .ws-search-hero — carried
+     here, full width, so the color spans the whole row edge-to-edge like
+     the hero above it, instead of showing as a smaller rounded card with
+     a visible gutter/border around it. */
+  background: linear-gradient(180deg, #eaf1fc 0%, #e3ecfb 100%);
+}
+
+.ws-search-panel[hidden] {
+  display: none;
+}
+
+.ws-search-panel__inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  /* Extra bottom padding — the "recent searches" pills (and, while
+     typing, the results dropdown) render absolutely-positioned below the
+     search box, so the panel needs real room under it or they spill out
+     onto the hero band underneath instead of sitting on the panel's own
+     background. */
+  padding: 32px 32px 190px;
+}
+
+/* Neutralize .ws-search-hero's own card look (background/radius/max-width)
+   here — the panel above already supplies the full-bleed color, and
+   .ws-search-panel__inner already supplies the centered max-width/padding,
+   so the widget's default "card floating on a page" styling would just
+   double up as an inner box with visible white space around it. */
+.ws-search-panel .ws-search-hero {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}

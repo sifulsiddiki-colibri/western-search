@@ -3,38 +3,128 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Western Schools — Course Search (prototype)</title>
+    <title>Western Schools — Nursing Continuing Education</title>
+    <link rel="stylesheet" href="css/site-header.css" />
+    <link rel="stylesheet" href="css/home.css" />
     <link rel="stylesheet" href="css/search-widget.css" />
-    <style>
-      body {
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        max-width: 900px;
-        margin: 60px auto 120px;
-        padding: 0 20px;
-        color: #1a1a1a;
-      }
-      .dev-note {
-        margin-bottom: 32px;
-        padding: 10px 14px;
-        border-radius: 8px;
-        background: #f7f9fc;
-        border: 1px solid #e2e5ea;
-        color: #6b7280;
-        font-size: 13px;
-      }
-    </style>
   </head>
   <body>
-    <p class="dev-note">
-      Prototype — not on the WordPress theme yet. Pick a state, then search
-      (e.g. "cardiac", "ethics", "abuse"). Searches across every profession
-      automatically.
-    </p>
-    <div id="ws-course-search"></div>
+    <div class="ws-demo-tag">
+      Recreation of westernschools.com's real header/hero/discovery UI, for
+      demo purposes — the magnifying glass next to the cart (not on the
+      real site) opens the real typo-tolerant + semantic search inline;
+      Search/Enter/"see all" redirect to the recreated view-all.html.
+    </div>
+
+    <header class="ws-site-header">
+      <div class="ws-topbar">
+        <a class="ws-logo" href="#">
+          <img class="ws-logo__mark" src="images/site-logo.svg" alt="Western Schools — An Elite Learning Company" />
+        </a>
+        <nav class="ws-nav">
+          <a href="#">State CE <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a href="#">Specialty Topics <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        </nav>
+        <div class="ws-topbar__right">
+          <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
+          <a class="ws-faq" href="#">FAQs</a>
+          <button
+            type="button"
+            class="ws-search-toggle"
+            id="ws-search-toggle"
+            aria-label="Search courses"
+            aria-expanded="false"
+            aria-controls="ws-search-panel"
+          >
+            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+          <button class="ws-cart" aria-label="Cart" type="button">
+            <svg viewBox="0 0 22 20" fill="none"><path d="M1 1h2.5L6 13.5h11L19.5 4H5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="18" r="1.4" fill="currentColor"/><circle cx="16" cy="18" r="1.4" fill="currentColor"/></svg>
+          </button>
+          <a class="ws-signin" href="#">Sign In</a>
+        </div>
+      </div>
+    </header>
+
+    <div class="ws-search-panel" id="ws-search-panel" hidden>
+      <div class="ws-search-panel__inner">
+        <div id="ws-course-search"></div>
+      </div>
+    </div>
+
+    <section class="ws-home-hero">
+      <div class="ws-home-hero__photo" style="background-image: url('images/hero-nurse.jpg')"></div>
+      <div class="ws-home-hero__card">
+        <h1 class="ws-home-hero__heading">Learn with a trusted nursing CE provider</h1>
+        <p class="ws-home-hero__sub">
+          Discover quality nursing continuing education courses written by
+          experts and designed to deepen your expertise on the topics that
+          matter.
+        </p>
+        <a class="ws-home-hero__cta" href="#">View All Courses</a>
+      </div>
+    </section>
+
+    <h2 class="ws-expand-heading">
+      Expand your expertise while meeting your state CE requirements
+    </h2>
+
+    <section class="ws-discover">
+      <div class="ws-discover__panel ws-discover__panel--specialty">
+        <h3>Browse Courses by Specialty Topic</h3>
+        <p>
+          Explore an in-depth collection of master class courses on
+          specialty topics for nursing professionals.
+        </p>
+        <select class="ws-discover__select" aria-label="Select Specialty Topic">
+          <option>Select Specialty Topic</option>
+        </select>
+        <button type="button" class="ws-discover__continue">Continue</button>
+      </div>
+      <div class="ws-discover__panel ws-discover__panel--state">
+        <h3>Find CE in my State</h3>
+        <p>
+          Browse the full library of CE courses, including specialty and
+          state mandated topics.
+        </p>
+        <select class="ws-discover__select" aria-label="Select State">
+          <option>Select State</option>
+        </select>
+        <button type="button" class="ws-discover__continue">Continue</button>
+      </div>
+    </section>
 
     <script src="js/search-widget.js"></script>
     <script>
-      WSCourseSearch.init("#ws-course-search");
+      // Mounted immediately on load (not on first click) so the state/
+      // license-type lookups — and, once a state is known, that state's
+      // catalog — are already warm by the time someone opens the search
+      // panel. The panel container itself just toggles `hidden`; the
+      // widget underneath keeps working (and prefetching) the whole time.
+      const search = WSCourseSearch.init("#ws-course-search", {
+        viewAllPageUrl: "view-all.html",
+      });
+
+      const toggleBtn = document.getElementById("ws-search-toggle");
+      const panel = document.getElementById("ws-search-panel");
+
+      toggleBtn.addEventListener("click", () => {
+        const open = panel.hidden;
+        panel.hidden = !open;
+        toggleBtn.classList.toggle("is-active", open);
+        toggleBtn.setAttribute("aria-expanded", String(open));
+        if (open) {
+          // The state <select>'s width is measured via offsetWidth, which
+          // reads 0 while the panel is `hidden` (display:none) — recompute
+          // now that it's actually visible, or it's stuck at a too-narrow
+          // chrome-only width from the initial (hidden) render.
+          search.sizeStateSelect();
+          panel.scrollIntoView({ behavior: "smooth", block: "start" });
+          const input = panel.querySelector(".ws-search__input");
+          if (input) input.focus();
+        }
+      });
     </script>
   </body>
 </html>

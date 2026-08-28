@@ -78,6 +78,9 @@ const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
 };
 
 function fetchJson(url) {
@@ -258,8 +261,10 @@ function trimProduct(product) {
       {
         licenseType: offering.licenseType,
         creditHours: offering.creditHours,
+        secondaryCreditHours: offering.secondaryCreditHours,
         isMandatory: offering.isMandatory,
         creditType: offering.creditType,
+        rating: offering.rating,
       },
     ],
   };

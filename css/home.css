@@ -190,18 +190,23 @@ a {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Search panel — hidden until the header magnifying glass is toggled.    */
-/* Sits between the header and the hero, in normal page flow (not an      */
-/* overlay), so opening it pushes the rest of the page down.              */
+/* Search flyout — hidden until the header magnifying glass is toggled.   */
+/* A small card anchored directly under the icon (.ws-search-anchor in    */
+/* site-header.css supplies the position:relative context), not a        */
+/* full-width band — it overlays the page instead of pushing it down.     */
 /* ---------------------------------------------------------------------- */
 
 .ws-search-panel {
-  border-bottom: 1px solid #e2e5ea;
-  /* Same blue gradient search-widget.css gives .ws-search-hero — carried
-     here, full width, so the color spans the whole row edge-to-edge like
-     the hero above it, instead of showing as a smaller rounded card with
-     a visible gutter/border around it. */
-  background: linear-gradient(180deg, #eaf1fc 0%, #e3ecfb 100%);
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  background: #fff;
+  border: 1px solid #e2e5ea;
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  z-index: 50;
 }
 
 .ws-search-panel[hidden] {
@@ -209,25 +214,87 @@ a {
 }
 
 .ws-search-panel__inner {
-  max-width: 1400px;
-  margin: 0 auto;
-  /* Extra bottom padding — the "recent searches" pills (and, while
-     typing, the results dropdown) render absolutely-positioned below the
-     search box, so the panel needs real room under it or they spill out
-     onto the hero band underneath instead of sitting on the panel's own
-     background. */
-  padding: 32px 32px 190px;
+  padding: 16px;
 }
 
 /* Neutralize .ws-search-hero's own card look (background/radius/max-width)
-   here — the panel above already supplies the full-bleed color, and
-   .ws-search-panel__inner already supplies the centered max-width/padding,
-   so the widget's default "card floating on a page" styling would just
-   double up as an inner box with visible white space around it. */
+   here — .ws-search-panel above already supplies the card, so the
+   widget's default "card floating on a page" styling would just double
+   up as an inner box with visible white space around it. */
 .ws-search-panel .ws-search-hero {
   max-width: none;
   margin: 0;
   padding: 0;
   border-radius: 0;
   background: none;
+}
+
+/* Compact mode — this flyout is ~340px wide, not the 900px the pill was
+   designed for, so it reuses search-widget.css's own "narrow viewport"
+   stacked layout (state / input / button as separate full-width rows)
+   unconditionally instead of the wide seamless pill, sized down further
+   (44px vs. that layout's 52px) since "much smaller" was the point. */
+.ws-search-panel .ws-search__eyebrow {
+  display: none;
+}
+
+.ws-search-panel .ws-search__controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ws-search-panel .ws-search__state-wrap {
+  width: 100%;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+.ws-search-panel .ws-search__state-wrap .ws-search__state,
+.ws-search-panel .ws-search__select-measure {
+  font-size: 14px;
+}
+
+.ws-search-panel .ws-search__state-wrap .ws-search__state {
+  width: 100% !important;
+  height: 44px;
+  padding: 10px 30px 10px 40px;
+}
+
+.ws-search-panel .ws-search__state-icon {
+  left: 14px;
+  width: 15px;
+  height: 15px;
+}
+
+.ws-search-panel .ws-search__input-wrap {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+.ws-search-panel .ws-search__input-wrap .ws-search__input {
+  height: 44px;
+  padding: 10px 60px 10px 40px;
+  font-size: 14px;
+}
+
+.ws-search-panel .ws-search__input-icon {
+  left: 14px;
+  width: 16px;
+  height: 16px;
+}
+
+.ws-search-panel .ws-search__submit {
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 13px;
 }

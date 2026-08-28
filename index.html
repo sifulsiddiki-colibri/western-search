@@ -18,16 +18,23 @@
 
     <header class="ws-site-header">
       <div class="ws-topbar-utility">
-        <button
-          type="button"
-          class="ws-search-toggle"
-          id="ws-search-toggle"
-          aria-label="Search courses"
-          aria-expanded="false"
-          aria-controls="ws-search-panel"
-        >
-          <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        </button>
+        <div class="ws-search-anchor">
+          <button
+            type="button"
+            class="ws-search-toggle"
+            id="ws-search-toggle"
+            aria-label="Search courses"
+            aria-expanded="false"
+            aria-controls="ws-search-panel"
+          >
+            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+          <div class="ws-search-panel" id="ws-search-panel" hidden>
+            <div class="ws-search-panel__inner">
+              <div id="ws-course-search"></div>
+            </div>
+          </div>
+        </div>
         <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
         <a class="ws-faq" href="#">FAQs</a>
       </div>
@@ -48,12 +55,6 @@
         </div>
       </div>
     </header>
-
-    <div class="ws-search-panel" id="ws-search-panel" hidden>
-      <div class="ws-search-panel__inner">
-        <div id="ws-course-search"></div>
-      </div>
-    </div>
 
     <section class="ws-home-hero">
       <div class="ws-home-hero__photo" style="background-image: url('images/hero-nurse.jpg')"></div>
@@ -122,9 +123,19 @@
           // now that it's actually visible, or it's stuck at a too-narrow
           // chrome-only width from the initial (hidden) render.
           search.sizeStateSelect();
-          panel.scrollIntoView({ behavior: "smooth", block: "start" });
           const input = panel.querySelector(".ws-search__input");
           if (input) input.focus();
+        }
+      });
+
+      // Now a small anchored flyout, not a full-width band — close it on
+      // an outside click like any other dropdown, or it just sits open
+      // while someone scrolls past it.
+      document.addEventListener("click", (e) => {
+        if (!panel.hidden && !e.target.closest(".ws-search-anchor")) {
+          panel.hidden = true;
+          toggleBtn.classList.remove("is-active");
+          toggleBtn.setAttribute("aria-expanded", "false");
         }
       });
     </script>

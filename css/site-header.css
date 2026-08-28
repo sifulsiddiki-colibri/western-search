@@ -39,12 +39,21 @@
   gap: 18px;
 }
 
-/* Positioning context for the search flyout (styled in home.css) — keeps
-   it anchored directly under the search icon instead of a full-width
-   band under the whole header. */
+/* The search bar (styled in home.css) sits inline in this same row,
+   immediately to the LEFT of the icon — `order` puts the icon visually
+   second without changing the DOM/JS wiring (button before panel). */
 .ws-search-anchor {
-  position: relative;
   display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-search-toggle {
+  order: 2;
+}
+
+.ws-search-panel {
+  order: 1;
 }
 
 .ws-topbar {

@@ -39,21 +39,14 @@
   gap: 18px;
 }
 
-/* The search bar (styled in home.css) sits inline in this same row,
-   immediately to the LEFT of the icon — `order` puts the icon visually
-   second without changing the DOM/JS wiring (button before panel). */
+/* Just a plain wrapper now — the search popup (styled in home.css) is
+   position:fixed and centered on the viewport, not laid out inline
+   here. It stays nested in this DOM anchor only so the outside-click-
+   closes check in index.html's script (e.target.closest(".ws-search-
+   anchor")) can tell a click inside the popup from a click outside it. */
 .ws-search-anchor {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.ws-search-toggle {
-  order: 2;
-}
-
-.ws-search-panel {
-  order: 1;
 }
 
 .ws-topbar {

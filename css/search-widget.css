@@ -47,7 +47,11 @@
   position: absolute;
   visibility: hidden;
   white-space: nowrap;
-  font-size: 15px;
+  /* Must match .ws-search__state's own font exactly (16px, not 15px) —
+     sizeStateSelect() measures this span and adds the select's actual
+     padding with no extra slack, so any mismatch here understates the
+     real text width and clips the last character/letter. */
+  font-size: 16px;
   font-weight: 600;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }

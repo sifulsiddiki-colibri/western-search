@@ -35,6 +35,11 @@
             </div>
           </div>
         </div>
+        <!-- Outside .ws-search-anchor on purpose — index.html's outside-
+             click-closes check treats anything inside .ws-search-anchor
+             as "inside" the popup, and the backdrop itself needs to
+             count as "outside" so clicking it closes the popup. -->
+        <div class="ws-search-backdrop" id="ws-search-backdrop" hidden></div>
         <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
         <a class="ws-faq" href="#">FAQs</a>
       </div>
@@ -111,32 +116,43 @@
 
       const toggleBtn = document.getElementById("ws-search-toggle");
       const panel = document.getElementById("ws-search-panel");
+      const backdrop = document.getElementById("ws-search-backdrop");
+
+      function openPanel() {
+        panel.hidden = false;
+        backdrop.hidden = false;
+        toggleBtn.classList.add("is-active");
+        toggleBtn.setAttribute("aria-expanded", "true");
+        // The state <select>'s width is measured via offsetWidth, which
+        // reads 0 while the panel is `hidden` (display:none) — recompute
+        // now that it's actually visible, or it's stuck at a too-narrow
+        // chrome-only width from the initial (hidden) render.
+        search.sizeStateSelect();
+        const input = panel.querySelector(".ws-search__input");
+        if (input) input.focus();
+      }
+
+      function closePanel() {
+        panel.hidden = true;
+        backdrop.hidden = true;
+        toggleBtn.classList.remove("is-active");
+        toggleBtn.setAttribute("aria-expanded", "false");
+      }
 
       toggleBtn.addEventListener("click", () => {
-        const open = panel.hidden;
-        panel.hidden = !open;
-        toggleBtn.classList.toggle("is-active", open);
-        toggleBtn.setAttribute("aria-expanded", String(open));
-        if (open) {
-          // The state <select>'s width is measured via offsetWidth, which
-          // reads 0 while the panel is `hidden` (display:none) — recompute
-          // now that it's actually visible, or it's stuck at a too-narrow
-          // chrome-only width from the initial (hidden) render.
-          search.sizeStateSelect();
-          const input = panel.querySelector(".ws-search__input");
-          if (input) input.focus();
-        }
+        if (panel.hidden) openPanel();
+        else closePanel();
       });
 
-      // Now a small anchored flyout, not a full-width band — close it on
-      // an outside click like any other dropdown, or it just sits open
-      // while someone scrolls past it.
+      // A popup, not an inline flyout — close it on a backdrop click or
+      // Escape, like any other modal.
       document.addEventListener("click", (e) => {
         if (!panel.hidden && !e.target.closest(".ws-search-anchor")) {
-          panel.hidden = true;
-          toggleBtn.classList.remove("is-active");
-          toggleBtn.setAttribute("aria-expanded", "false");
+          closePanel();
         }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !panel.hidden) closePanel();
       });
     </script>
   </body>

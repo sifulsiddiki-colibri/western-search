@@ -190,24 +190,39 @@ a {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Search bar — hidden until the header magnifying glass is toggled. A    */
-/* small single-line bar that expands inline to the LEFT of the icon      */
-/* (order: 1 vs. the icon's order: 2 in site-header.css), not a dropdown  */
-/* card below it — same row, same baseline, like a classic header search  */
-/* toggle. Only the results list below it needs to float (.ws-search__    */
-/* dropdown is already position:absolute in search-widget.css).           */
+/* Search popup — hidden until the header magnifying glass is toggled.    */
+/* A centered modal showing the full-size search bar (matching the       */
+/* "search bar v2" mockup's own proportions/labeling), over a dimmed      */
+/* backdrop — not an inline flyout. The bar/results inside it are the     */
+/* widget's own default styling from search-widget.css, unmodified; this  */
+/* file only supplies the popup chrome around it. Same live API/results   */
+/* as everywhere else in this demo — this is a presentation change only.  */
 /* ---------------------------------------------------------------------- */
 
+.ws-search-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 90;
+}
+
+.ws-search-backdrop[hidden] {
+  display: none;
+}
+
 .ws-search-panel {
-  display: flex;
-  align-items: center;
-  /* No fixed width — the state chip's width now genuinely tracks the
-     selected state's full name (see sizeStateSelect() in
-     search-widget.js), so the bar has to be free to grow with it
-     instead of clipping/squeezing the input to make room. Reserves
-     ~130px for the icon + FAQs + row padding still sharing this row. */
-  width: auto;
-  max-width: calc(100vw - 130px);
+  position: fixed;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
+  padding: 28px;
+  z-index: 100;
 }
 
 .ws-search-panel[hidden] {
@@ -216,126 +231,4 @@ a {
 
 .ws-search-panel__inner {
   width: 100%;
-}
-
-/* Neutralize .ws-search-hero's own card look (background/radius/max-width/
-   shadow) — at this size it should read as one small bar, not a card
-   floating inside another card. */
-.ws-search-panel .ws-search-hero {
-  max-width: none;
-  margin: 0;
-  padding: 0;
-  border-radius: 0;
-  background: none;
-}
-
-.ws-search-panel .ws-search__eyebrow {
-  display: none;
-}
-
-/* This bar stays a single-line horizontal pill at every viewport width —
-   explicitly pinned below because search-widget.css's own <640px media
-   query otherwise stacks state/input/button into a column (correct for
-   the old full-width hero pill's mobile layout, wrong for this always-
-   small bar) and forces each segment to width:100%; every property that
-   query changes needs an explicit override here to fully cancel it. */
-.ws-search-panel .ws-search__controls {
-  flex-direction: row;
-  gap: 0;
-  height: 34px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid #e2e5ea;
-  /* Soft and tight, not the hero pill's dramatic 0 12px 32px shadow —
-     this bar sits directly on the header's own white background, so a
-     big dark shadow just reads as a stray box instead of a lifted
-     control. The border above does most of the definition work. */
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
-}
-
-.ws-search-panel .ws-search__state-wrap {
-  width: auto;
-  border: none;
-  border-right: 1px solid #e2e5ea;
-  border-radius: 0;
-}
-
-.ws-search-panel .ws-search__state-wrap .ws-search__state,
-.ws-search-panel .ws-search__select-measure {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ws-search-panel .ws-search__state-wrap .ws-search__state {
-  height: 34px;
-  padding: 0 24px 0 26px;
-  /* search-widget.css's own chevron is positioned "right 18px", tuned
-     for the hero pill's much wider 34px right padding — at this bar's
-     smaller 24px padding that put the icon 6px inside the text's own
-     content box, covering the state name's last letter. Moving it in
-     to "right 6px" keeps it clear of the (now correctly-sized, see
-     sizeStateSelect() in search-widget.js) text next to it. */
-  background-position: right 6px center;
-}
-
-.ws-search-panel .ws-search__state-icon {
-  left: 8px;
-  width: 12px;
-  height: 12px;
-}
-
-.ws-search-panel .ws-search__input-wrap {
-  width: auto;
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  border-radius: 0;
-}
-
-.ws-search-panel .ws-search__input-wrap .ws-search__input {
-  width: 170px;
-  height: 34px;
-  padding: 0 30px 0 30px;
-  font-size: 12px;
-}
-
-/* The state chip doesn't shrink (flex-shrink:0, so it can show the full
-   state name without clipping) and neither does the button, so the
-   input is the one that has to give up width on a narrow screen — long
-   state names plus a fixed 170px input can genuinely not fit together
-   at phone widths. */
-@media (max-width: 480px) {
-  .ws-search-panel .ws-search__input-wrap .ws-search__input {
-    width: 90px;
-  }
-}
-
-.ws-search-panel .ws-search__input-icon {
-  left: 10px;
-  width: 13px;
-  height: 13px;
-}
-
-.ws-search-panel .ws-search__clear {
-  right: 6px;
-  font-size: 10px;
-}
-
-/* Icon-only submit — the full "SEARCH" label doesn't fit a bar this
-   size; the label stays in the DOM (search-widget.js renders it) for
-   screen readers, just visually hidden. */
-.ws-search-panel .ws-search__submit {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  gap: 0;
-}
-
-.ws-search-panel .ws-search__submit span {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
 }

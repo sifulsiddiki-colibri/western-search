@@ -384,12 +384,17 @@
       const computed = window.getComputedStyle(this.stateSelect);
       const chromeWidth =
         parseFloat(computed.paddingLeft) + parseFloat(computed.paddingRight);
+      // +3px slack: the hidden measure span's font must match the select's
+      // exactly to measure accurately, and even then sub-pixel rendering
+      // differences between the two elements can clip the last character
+      // with zero margin for error.
+      const SAFETY_BUFFER = 3;
       // !important so this always wins over a narrow-viewport stylesheet
       // rule (e.g. a <640px media query forcing width:100%) instead of
       // silently losing to it and clipping the state name.
       this.stateSelect.style.setProperty(
         "width",
-        `${textWidth + chromeWidth}px`,
+        `${textWidth + chromeWidth + SAFETY_BUFFER}px`,
         "important"
       );
     }

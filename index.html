@@ -11,12 +11,26 @@
   <body>
     <div class="ws-demo-tag">
       Recreation of westernschools.com's real header/hero/discovery UI, for
-      demo purposes — the magnifying glass next to the cart (not on the
-      real site) opens the real typo-tolerant + semantic search inline;
-      Search/Enter/"see all" redirect to the recreated view-all.html.
+      demo purposes — the magnifying glass (not on the real site) opens
+      the real typo-tolerant + semantic search inline; Search/Enter/
+      "see all" redirect to the recreated view-all.html.
     </div>
 
     <header class="ws-site-header">
+      <div class="ws-topbar-utility">
+        <button
+          type="button"
+          class="ws-search-toggle"
+          id="ws-search-toggle"
+          aria-label="Search courses"
+          aria-expanded="false"
+          aria-controls="ws-search-panel"
+        >
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+        <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
+        <a class="ws-faq" href="#">FAQs</a>
+      </div>
       <div class="ws-topbar">
         <a class="ws-logo" href="#">
           <img class="ws-logo__mark" src="images/site-logo.svg" alt="Western Schools — An Elite Learning Company" />
@@ -27,18 +41,6 @@
           <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         </nav>
         <div class="ws-topbar__right">
-          <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
-          <a class="ws-faq" href="#">FAQs</a>
-          <button
-            type="button"
-            class="ws-search-toggle"
-            id="ws-search-toggle"
-            aria-label="Search courses"
-            aria-expanded="false"
-            aria-controls="ws-search-panel"
-          >
-            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </button>
           <button class="ws-cart" aria-label="Cart" type="button">
             <svg viewBox="0 0 22 20" fill="none"><path d="M1 1h2.5L6 13.5h11L19.5 4H5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="18" r="1.4" fill="currentColor"/><circle cx="16" cy="18" r="1.4" fill="currentColor"/></svg>
           </button>

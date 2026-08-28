@@ -5,8 +5,10 @@
   westernschools.com); colors are pixel-sampled/computed-style-read
   directly from a live screenshot of westernschools.com (2026-08-28):
   brand blue #1758B6 (nav links, Sign In border, Continue buttons),
-  heading ink #4F4F4F. The search icon next to the cart is a demo
-  addition — the real site has no such icon there.
+  heading ink #4F4F4F. The two-row header (thin Call Us/FAQs utility row
+  above the logo/nav/cart row) matches the real site's own structure; the
+  search icon in that utility row is this demo's own addition — the real
+  site has no such icon.
 */
 
 .ws-demo-tag {
@@ -21,10 +23,26 @@
   border-bottom: 1px solid #eceef1;
 }
 
+/* Thin utility row above the main row — matches the real site's own
+   two-row header (Call Us/FAQs sit above the logo/nav/cart row there,
+   not inline with it). The search icon is this demo's own addition, put
+   at the left edge of this row (left of Call Us/FAQs) rather than down
+   by the cart, per the design direction to keep it grouped with this
+   row instead. */
+.ws-topbar-utility {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 6px 32px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+}
+
 .ws-topbar {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 18px 32px;
+  padding: 12px 32px 18px;
   display: flex;
   align-items: center;
   gap: 32px;
@@ -115,9 +133,17 @@
 }
 
 @media (max-width: 640px) {
+  .ws-topbar-utility {
+    padding: 6px 20px 0;
+    gap: 12px;
+  }
+  .ws-call {
+    display: none;
+  }
   .ws-topbar {
     flex-wrap: wrap;
     gap: 14px;
+    padding: 10px 20px 14px;
   }
   .ws-nav {
     order: 3;

@@ -376,8 +376,22 @@
       const selected = this.stateSelect.options[this.stateSelect.selectedIndex];
       this.selectMeasureEl.textContent = selected ? selected.textContent : "";
       const textWidth = this.selectMeasureEl.offsetWidth;
-      const CHROME_WIDTH = 42 + 30; // pin-icon padding-left + padding-right (incl. arrow) — no border, chrome is on the pill wrap now
-      this.stateSelect.style.width = `${textWidth + CHROME_WIDTH}px`;
+      // Read the select's own padding instead of a hardcoded chrome
+      // constant — different contexts embedding this widget (the
+      // full-width hero pill vs. a compact header bar) give it different
+      // padding, and a fixed number tuned for one clips or overlaps text
+      // in the other. Falls back safely to whatever CSS padding is live.
+      const computed = window.getComputedStyle(this.stateSelect);
+      const chromeWidth =
+        parseFloat(computed.paddingLeft) + parseFloat(computed.paddingRight);
+      // !important so this always wins over a narrow-viewport stylesheet
+      // rule (e.g. a <640px media query forcing width:100%) instead of
+      // silently losing to it and clipping the state name.
+      this.stateSelect.style.setProperty(
+        "width",
+        `${textWidth + chromeWidth}px`,
+        "important"
+      );
     }
 
     onInput() {

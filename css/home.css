@@ -201,8 +201,13 @@ a {
 .ws-search-panel {
   display: flex;
   align-items: center;
-  width: 300px;
-  max-width: calc(100vw - 200px);
+  /* No fixed width — the state chip's width now genuinely tracks the
+     selected state's full name (see sizeStateSelect() in
+     search-widget.js), so the bar has to be free to grow with it
+     instead of clipping/squeezing the input to make room. Reserves
+     ~130px for the icon + FAQs + row padding still sharing this row. */
+  width: auto;
+  max-width: calc(100vw - 130px);
 }
 
 .ws-search-panel[hidden] {
@@ -241,7 +246,12 @@ a {
   border-radius: 999px;
   overflow: hidden;
   background: #fff;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.15);
+  border: 1px solid #e2e5ea;
+  /* Soft and tight, not the hero pill's dramatic 0 12px 32px shadow —
+     this bar sits directly on the header's own white background, so a
+     big dark shadow just reads as a stray box instead of a lifted
+     control. The border above does most of the definition work. */
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
 }
 
 .ws-search-panel .ws-search__state-wrap {
@@ -283,9 +293,21 @@ a {
 }
 
 .ws-search-panel .ws-search__input-wrap .ws-search__input {
+  width: 170px;
   height: 34px;
   padding: 0 30px 0 30px;
   font-size: 12px;
+}
+
+/* The state chip doesn't shrink (flex-shrink:0, so it can show the full
+   state name without clipping) and neither does the button, so the
+   input is the one that has to give up width on a narrow screen — long
+   state names plus a fixed 170px input can genuinely not fit together
+   at phone widths. */
+@media (max-width: 480px) {
+  .ws-search-panel .ws-search__input-wrap .ws-search__input {
+    width: 90px;
+  }
 }
 
 .ws-search-panel .ws-search__input-icon {

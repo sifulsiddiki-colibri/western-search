@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>View All Nursing Continuing Education Courses — Western Schools</title>
+    <link rel="stylesheet" href="css/site-header.css" />
+    <link rel="stylesheet" href="css/view-all.css" />
+  </head>
+  <body>
+    <div class="ws-demo-tag">
+      Prototype — recreates the Western Schools view-all page, wired to the
+      typo-tolerant + semantic search instead of the live page's literal
+      search.
+    </div>
+
+    <header class="ws-site-header">
+      <div class="ws-topbar">
+        <a class="ws-logo" href="#">
+          <svg class="ws-logo__mark" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6 30c4-2 9-3 13-1 2 1 3 3 2 5-3 5-11 4-15-4z" fill="#ED8537"/>
+            <path d="M18 28c6-10 16-16 24-15-2 7-9 13-15 16-3 1.5-7 1-9-1z" fill="#ED8537"/>
+            <circle cx="34" cy="14" r="2.2" fill="#ED8537"/>
+          </svg>
+          <span class="ws-logo__text">
+            <strong>WESTERN<br />SCHOOLS<sup>®</sup></strong>
+            <small>An Elite Learning Company</small>
+          </span>
+        </a>
+        <nav class="ws-nav">
+          <a href="#">State CE <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a href="#">Specialty Topics <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+          <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+        </nav>
+        <div class="ws-topbar__right">
+          <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
+          <a class="ws-faq" href="#">FAQs</a>
+          <button class="ws-cart" aria-label="Cart" type="button">
+            <svg viewBox="0 0 22 20" fill="none"><path d="M1 1h2.5L6 13.5h11L19.5 4H5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="18" r="1.4" fill="currentColor"/><circle cx="16" cy="18" r="1.4" fill="currentColor"/></svg>
+          </button>
+          <a class="ws-signin" href="#">Sign In</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="ws-hero">
+      <div class="ws-hero__inner">
+        <h1 class="ws-hero__heading" id="ws-hero-heading">View All Nursing Continuing Education Courses</h1>
+        <p class="ws-hero__sub">Select your state to see bundles and courses most relevant to you</p>
+        <div class="ws-hero__controls">
+          <div class="ws-state-select-wrap">
+            <select id="ws-view-state" aria-label="State">
+              <option value="">Loading states…</option>
+            </select>
+          </div>
+          <button type="button" id="ws-view-courses-btn" class="ws-view-courses-btn">View Courses</button>
+        </div>
+      </div>
+      <div class="ws-hero__underline"></div>
+    </section>
+
+    <div class="ws-breadcrumb">
+      <a href="#" class="is-home">Home</a>
+      <span class="ws-breadcrumb__sep">›</span>
+      <a href="#">Nursing</a>
+      <span class="ws-breadcrumb__sep">›</span>
+      <span class="ws-breadcrumb__current">All Nursing Courses</span>
+    </div>
+
+    <main class="ws-main">
+      <p class="ws-intro-copy">
+        Western Schools 11+ hour courses are available in two formats: online
+        and in print. When you add an online course to your cart, the
+        printed copy will be auto-added, along with shipping and handling
+        costs. If you don't need a printed copy, simply remove it with a
+        click.
+      </p>
+
+      <div class="ws-layout">
+        <aside class="ws-sidebar">
+          <button type="button" class="ws-reset-filters" id="ws-reset-filters">Reset Filters</button>
+          <hr />
+
+          <div class="ws-filter-group">
+            <div class="ws-filter-group__header">
+              <h3>Search</h3>
+            </div>
+            <div class="ws-filter-group__body">
+              <div class="ws-sidebar-search">
+                <input
+                  type="text"
+                  id="ws-sidebar-search-input"
+                  placeholder="Search by course, topic, or license type"
+                  autocomplete="off"
+                />
+                <button type="button" id="ws-sidebar-search-btn" aria-label="Search">
+                  <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <hr />
+
+          <div class="ws-filter-group">
+            <div class="ws-filter-group__header">
+              <h3>Delivery Methods</h3>
+            </div>
+            <div class="ws-filter-group__body" id="ws-delivery-checkboxes"></div>
+          </div>
+          <hr />
+
+          <div class="ws-filter-group">
+            <div class="ws-filter-group__header">
+              <h3>Instructors</h3>
+            </div>
+            <div class="ws-filter-group__body" id="ws-instructor-checkboxes"></div>
+            <button type="button" class="ws-show-more" id="ws-show-more-instructors" hidden></button>
+          </div>
+        </aside>
+
+        <section class="ws-results">
+          <h2 class="ws-results__heading" id="ws-results-heading">More Learning Options</h2>
+          <p class="ws-results__sub" id="ws-results-sub">
+            Explore a growing library of nursing CE courses by experts, for experts.
+          </p>
+
+          <div class="ws-course-grid" id="ws-course-grid"></div>
+
+          <p class="ws-results__count" id="ws-results-count"></p>
+        </section>
+      </div>
+    </main>
+
+    <script src="js/view-all.js"></script>
+  </body>
+</html>

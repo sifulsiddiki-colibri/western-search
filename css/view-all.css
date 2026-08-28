@@ -1,0 +1,515 @@
+/*
+  Recreation of the Western Schools "View All Courses" page, sampled
+  directly from test.westernschools.com screenshots (2026-08-20):
+  brand blue #2B57B0, logo orange #ED8537, breadcrumb purple #87308B,
+  hero peach gradient #FBEADD -> #FFFFFF, delivery-method pill #F2CAA0,
+  credit-type "Elective" pill #9BADC0. "Mandatory" pill reuses the pairing
+  already established in search-widget.css (#FAECE1 / #B4794F) — no
+  Mandatory course appeared in the sampled screenshots to confirm directly.
+
+  Heading font is the same Poppins placeholder used in search-widget.css,
+  standing in for Western Schools' actual brand typeface.
+*/
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap");
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #212121;
+  background: #fff;
+}
+
+a {
+  color: inherit;
+}
+
+/* Header/topbar now lives in css/site-header.css, shared with index.html. */
+
+/* ---------------------------------------------------------------------- */
+/* Hero                                                                   */
+/* ---------------------------------------------------------------------- */
+
+.ws-hero {
+  background: linear-gradient(100deg, #fdf8f4 0%, #fbeadd 55%, #f8e3d1 100%);
+  padding: 48px 32px 0;
+}
+
+.ws-hero__inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.ws-hero__heading {
+  margin: 0 0 16px;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  color: #4f4f4f;
+}
+
+.ws-hero__sub {
+  margin: 0 0 24px;
+  font-size: 18px;
+  color: #4b5563;
+}
+
+.ws-hero__controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ws-state-select-wrap select {
+  height: 48px;
+  min-width: 220px;
+  padding: 12px 34px 12px 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 16px;
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236B7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 14px center;
+  appearance: none;
+  -webkit-appearance: none;
+  color: #212121;
+}
+
+.ws-view-courses-btn {
+  height: 48px;
+  padding: 0 28px;
+  border: none;
+  border-radius: 6px;
+  background: #2b57b0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.ws-view-courses-btn:hover {
+  background: #234a99;
+}
+
+.ws-hero__underline {
+  max-width: 1400px;
+  margin: 0 auto;
+  height: 4px;
+  background: #eceef1;
+}
+
+.ws-hero__underline::before {
+  content: "";
+  display: block;
+  width: 220px;
+  height: 4px;
+  background: #2b57b0;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Breadcrumb                                                             */
+/* ---------------------------------------------------------------------- */
+
+.ws-breadcrumb {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 18px 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #eceef1;
+}
+
+.ws-breadcrumb a {
+  text-decoration: none;
+}
+
+.ws-breadcrumb a.is-home {
+  color: #87308b;
+}
+
+.ws-breadcrumb a:not(.is-home) {
+  color: #2b57b0;
+}
+
+.ws-breadcrumb__sep {
+  color: #a2a2a2;
+}
+
+.ws-breadcrumb__current {
+  color: #a2a2a2;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Main / intro copy                                                      */
+/* ---------------------------------------------------------------------- */
+
+.ws-main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 32px 80px;
+}
+
+.ws-intro-copy {
+  margin: 0 0 32px;
+  max-width: 980px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4b5563;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Layout                                                                 */
+/* ---------------------------------------------------------------------- */
+
+.ws-layout {
+  display: flex;
+  gap: 40px;
+  align-items: flex-start;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Sidebar / filters                                                     */
+/* ---------------------------------------------------------------------- */
+
+.ws-sidebar {
+  flex: 0 0 260px;
+}
+
+.ws-sidebar hr {
+  border: none;
+  border-top: 1px solid #eceef1;
+  margin: 18px 0;
+}
+
+.ws-reset-filters {
+  border: none;
+  background: none;
+  color: #2b57b0;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ws-filter-group__header h3 {
+  margin: 0 0 14px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #212121;
+}
+
+.ws-sidebar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ws-sidebar-search input {
+  width: 100%;
+  height: 44px;
+  padding: 10px 40px 10px 14px;
+  border: 1px solid #2b57b0;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.ws-sidebar-search input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(43, 87, 176, 0.15);
+}
+
+.ws-sidebar-search button {
+  position: absolute;
+  right: 12px;
+  border: none;
+  background: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+}
+
+.ws-sidebar-search button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ws-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  cursor: pointer;
+  font-size: 15px;
+  color: #212121;
+}
+
+.ws-checkbox-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #2b57b0;
+  cursor: pointer;
+}
+
+.ws-checkbox-row span.count {
+  color: #6b7280;
+}
+
+.ws-show-more {
+  margin-top: 6px;
+  border: none;
+  background: none;
+  color: #2b57b0;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ws-filter-empty {
+  font-size: 13px;
+  color: #9aa2b1;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Results                                                                */
+/* ---------------------------------------------------------------------- */
+
+.ws-results {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ws-results__heading {
+  margin: 0 0 8px;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-size: 32px;
+  font-weight: 700;
+  color: #4f4f4f;
+}
+
+.ws-results__sub {
+  margin: 0 0 28px;
+  font-size: 15px;
+  color: #4b5563;
+}
+
+.ws-course-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 1100px) {
+  .ws-course-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .ws-course-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ws-course-card {
+  position: relative;
+  border: 1px solid #2b57b0;
+  border-radius: 4px;
+  padding: 18px 18px 22px;
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-course-card__link {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  text-decoration: none;
+  color: inherit;
+}
+
+.ws-course-card__title {
+  margin: 0;
+  font-family: "Poppins", system-ui, sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: #212121;
+  line-height: 1.3;
+}
+
+.ws-course-card__title mark {
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: #2b57b0;
+}
+
+.ws-course-card__spacer {
+  flex: 1 1 auto;
+  min-height: 16px;
+}
+
+.ws-course-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ws-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ws-pill--delivery {
+  background: #f2caa0;
+  color: #2b2320;
+}
+
+.ws-pill--elective {
+  background: #9badc0;
+  color: #333a42;
+}
+
+.ws-pill--mandatory {
+  background: #faece1;
+  color: #b4794f;
+}
+
+.ws-pill--semantic {
+  background: #f1ecfb;
+  color: #6d4fc4;
+  gap: 4px;
+}
+
+.ws-pill--semantic svg {
+  width: 11px;
+  height: 11px;
+}
+
+.ws-course-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #212121;
+}
+
+.ws-course-card__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ws-course-card__meta svg {
+  width: 14px;
+  height: 14px;
+  color: #212121;
+}
+
+.ws-course-card__rating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #212121;
+}
+
+.ws-course-card__rating .stars {
+  color: #f0b429;
+  letter-spacing: 1px;
+}
+
+.ws-course-card__price {
+  font-size: 20px;
+  font-weight: 700;
+  color: #212121;
+}
+
+.ws-course-card__chevron {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 52px;
+  height: 52px;
+  background: #2b57b0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 0 4px 0;
+}
+
+.ws-course-card__chevron svg {
+  width: 14px;
+  height: 14px;
+  color: #fff;
+}
+
+.ws-course-card:hover {
+  box-shadow: 0 8px 20px rgba(43, 87, 176, 0.15);
+}
+
+.ws-results__count {
+  margin-top: 24px;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.ws-results__message {
+  padding: 40px 0;
+  font-size: 15px;
+  color: #6b7280;
+}
+
+.ws-results__message--loading {
+  animation: ws-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ws-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 900px) {
+  .ws-layout {
+    flex-direction: column;
+  }
+  .ws-sidebar {
+    flex: none;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .ws-hero__heading {
+    font-size: 28px;
+  }
+  .ws-hero__controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

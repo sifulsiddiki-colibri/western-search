@@ -25,15 +25,14 @@
   // the browser can never call it directly — something same-origin always
   // sits in between.
   const WP_CONFIG = typeof wsSearchConfig !== "undefined" ? wsSearchConfig : null;
-  const SEARCH_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search`
-    : "/api/search";
-  const LOOKUPS_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_lookups`
-    : "/api/lookups";
-  const WARM_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_warm`
-    : "/api/warm";
+  // Under WordPress this calls the plugin's real REST API
+  // (ws-course-search/v1/*, registered in ws_search_register_rest_routes())
+  // per the architecture doc's "WordPress REST endpoint" component — not
+  // admin-ajax.php, which is what these called before and what the ajax
+  // actions of the same name still exist for backward compatibility.
+  const SEARCH_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}search` : "/api/search";
+  const LOOKUPS_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}lookups` : "/api/lookups";
+  const WARM_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}warm` : "/api/warm";
   // Only meaningful under WordPress (WP_CONFIG) — server.js has no
   // equivalent endpoint since it already returns semantic matches in the
   // main /api/search response.
@@ -155,6 +154,7 @@
   const CLOCK_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const SPARKLE_ICON = `<svg viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 2l1.2 4.8L16 8l-4.8 1.2L10 14l-1.2-4.8L4 8l4.8-1.2L10 2z"/><path d="M16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6L16 13z"/></svg>`;
   const PIN_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 18s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/></svg>`;
+  const CHEVRON_ICON = `<svg viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   class WSCourseSearch {
     constructor(root, options) {
@@ -187,6 +187,66 @@
       this.render();
       if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
       this.loadLookups().then(() => this.applyInitialQuery());
+
+      // Every ws-course-search block on the same page mirrors the same
+      // state and search query — deliberate, not the older per-instance
+      // independence this widget used to guarantee (see the storageKey/
+      // recentKey comment above, which still keeps each instance's own
+      // *saved* recent-searches/localStorage separate; this is just live
+      // in-memory mirroring for as long as the page stays open).
+      this._applyingRemoteSync = false;
+      this._handleRemoteSync = (e) => this.handleRemoteSync(e);
+      document.addEventListener("ws-search:sync", this._handleRemoteSync);
+    }
+
+    // Tells every other WSCourseSearch instance on the page about a
+    // state/query change this instance just made. No-ops while this
+    // instance is itself in the middle of applying someone else's
+    // broadcast, so two instances can't ping-pong the same change back
+    // and forth forever.
+    broadcastSync(detail) {
+      if (this._applyingRemoteSync) return;
+      document.dispatchEvent(
+        new CustomEvent("ws-search:sync", { detail: { source: this, ...detail } })
+      );
+    }
+
+    // Applies another instance's broadcasted state/query to this one.
+    // Mirrors the same effects selectState()/onInput() would have had,
+    // without re-broadcasting (that's what _applyingRemoteSync guards).
+    handleRemoteSync(e) {
+      if (e.detail.source === this) return;
+
+      this._applyingRemoteSync = true;
+      try {
+        if ("stateAbbv" in e.detail) {
+          this.context.stateAbbv = e.detail.stateAbbv;
+          this.stateInput.value = e.detail.stateFullName || "";
+          this.saveContext();
+          this.closeStateSuggestions();
+          if (e.detail.stateAbbv) this.warmState(e.detail.stateAbbv);
+        }
+
+        if ("query" in e.detail) {
+          this.input.value = e.detail.query;
+          this.clearBtn.hidden = !e.detail.query;
+        }
+
+        if ("stateAbbv" in e.detail || "query" in e.detail) {
+          const query = this.input.value.trim();
+          if (!query) {
+            this.closeResults();
+            this.renderRecent();
+          } else if (query.length < MIN_QUERY_LENGTH) {
+            this.closeResults();
+          } else {
+            this.showLoading();
+            this.runSearch();
+          }
+        }
+      } finally {
+        this._applyingRemoteSync = false;
+      }
     }
 
     // Indexing a state a user hasn't searched yet costs several real
@@ -296,14 +356,11 @@
                   aria-expanded="false"
                   aria-owns="${stateListId}"
                 />
+                <span class="ws-search__state-chevron" aria-hidden="true">${CHEVRON_ICON}</span>
                 <ul class="ws-search__state-list" id="${stateListId}" hidden></ul>
               </div>`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
-          <p class="ws-search__eyebrow"></p>
-          <h2 class="ws-search__heading">What are you looking to learn today?</h2>
-          <p class="ws-search__subheading">Search our full library of board-approved courses, bundles, and membership plans.</p>
-
           <div class="ws-search__panel">
             <div class="ws-search__controls">
               ${stateFieldHtml}
@@ -347,7 +404,6 @@
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
-      this.eyebrowEl = this.root.querySelector(".ws-search__eyebrow");
       this.recentEl = this.root.querySelector(".ws-search__recent");
       this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
@@ -399,6 +455,7 @@
       // there looking frozen.
       if (this.input.value.trim()) this.showLoading();
       this.runSearch();
+      this.broadcastSync({ stateAbbv: state.stateAbbv, stateFullName: state.stateFullName });
     }
 
     wireStateInput() {
@@ -532,13 +589,9 @@
 
     async loadLookups() {
       try {
-        const { licenseTypes, states } = await fetch(LOOKUPS_ENDPOINT).then(
-          (r) => r.json()
-        );
+        const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
 
         this.states = states.sort((a, b) => a.stateFullName.localeCompare(b.stateFullName));
-
-        this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
         // Pre-fill from a prior visit (localStorage) or an explicit
         // defaultState option, same as before — just resolving the
@@ -561,15 +614,20 @@
       if (!query) {
         this.closeResults();
         this.renderRecent();
+        this.broadcastSync({ query });
         return;
       }
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
+        this.broadcastSync({ query });
         return;
       }
 
       this.showLoading();
-      this.debounceTimer = setTimeout(() => this.runSearch(), DEBOUNCE_MS);
+      this.debounceTimer = setTimeout(() => {
+        this.runSearch();
+        this.broadcastSync({ query });
+      }, DEBOUNCE_MS);
     }
 
     // Navigates to the "view all results" page instead of expanding the

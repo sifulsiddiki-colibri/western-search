@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.0
+ * Version:     4.0.4
  * Author:      Siful Siddiki
  */
 
@@ -287,11 +287,37 @@ function ws_search_register_settings() {
 }
 add_action( 'admin_init', 'ws_search_register_settings' );
 
+function ws_search_render_embeddings_upload_notice() {
+	if ( ! isset( $_GET['ws_embeddings_upload'] ) ) {
+		return;
+	}
+
+	if ( 'success' === $_GET['ws_embeddings_upload'] ) {
+		$saved   = isset( $_GET['saved'] ) ? (int) $_GET['saved'] : 0;
+		$skipped = isset( $_GET['skipped'] ) ? (int) $_GET['skipped'] : 0;
+		printf(
+			'<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+			esc_html(
+				sprintf(
+					'Embeddings uploaded: %d saved%s.',
+					$saved,
+					$skipped > 0 ? ", {$skipped} skipped (missing productId/vector/sourceHash)" : ''
+				)
+			)
+		);
+	} elseif ( 'error' === $_GET['ws_embeddings_upload'] ) {
+		$message = isset( $_GET['message'] ) ? sanitize_text_field( wp_unslash( rawurldecode( $_GET['message'] ) ) ) : 'Upload failed.';
+		printf( '<div class="notice notice-error is-dismissible"><p>%s</p></div>', esc_html( $message ) );
+	}
+}
+
 function ws_search_render_settings_page() {
 	?>
 	<div class="wrap">
 		<h1>WS Course Search</h1>
 		<p>Keyword and typo-tolerant search run automatically — no configuration needed.</p>
+
+		<?php ws_search_render_embeddings_upload_notice(); ?>
 
 		<h2>Semantic search</h2>
 		<form action="options.php" method="post">
@@ -323,6 +349,22 @@ function ws_search_render_settings_page() {
 			Refresh search embeddings
 		</button>
 		<p id="ws-embeddings-status"></p>
+
+		<h3>Or upload embeddings generated elsewhere</h3>
+		<p class="description">
+			For a catalog too large to comfortably compute in one browser tab
+			(e.g. another subsidiary's), generate embeddings offline — the
+			Claude Code plugin under <code>claude-plugins/embeddings-generator/</code>
+			in this repo does this — and upload the resulting JSON file here
+			instead. Expected shape:
+			<code>{"items": [{"productId", "sourceHash", "vector"}, ...]}</code>.
+		</p>
+		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post" enctype="multipart/form-data">
+			<?php wp_nonce_field( 'ws_search_upload_embeddings' ); ?>
+			<input type="hidden" name="action" value="ws_search_upload_embeddings" />
+			<input type="file" name="ws_embeddings_file" accept="application/json,.json" required />
+			<?php submit_button( 'Upload embeddings JSON', 'secondary' ); ?>
+		</form>
 	</div>
 	<?php
 }
@@ -335,7 +377,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.0',
+		'4.0.4',
 		true
 	);
 	wp_localize_script(
@@ -365,20 +407,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.0'
+		'4.0.4'
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.0',
+		'4.0.4',
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.0',
+		'4.0.4',
 		true
 	);
 }
@@ -392,6 +434,7 @@ function ws_search_enqueue_assets() {
 		'wsSearchConfig',
 		array(
 			'ajaxUrl'             => admin_url( 'admin-ajax.php' ),
+			'restUrl'             => esc_url_raw( rest_url( 'ws-course-search/v1/' ) ),
 			'semanticEnabled'     => ws_semantic_enabled(),
 			'embeddingsModuleUrl' => plugins_url( 'assets/embeddings.js', __FILE__ ),
 			'modelsUrl'           => plugins_url( 'assets/models/', __FILE__ ),
@@ -795,13 +838,15 @@ function ws_row_to_product( $row, $match_type ) {
 // AJAX handlers
 // ---------------------------------------------------------------------------
 
-function ws_search_handle_lookups() {
-	wp_send_json(
-		array(
-			'licenseTypes' => ws_get_license_types(),
-			'states'       => ws_get_states(),
-		)
+function ws_search_lookups_data() {
+	return array(
+		'licenseTypes' => ws_get_license_types(),
+		'states'       => ws_get_states(),
 	);
+}
+
+function ws_search_handle_lookups() {
+	wp_send_json( ws_search_lookups_data() );
 }
 add_action( 'wp_ajax_ws_search_lookups', 'ws_search_handle_lookups' );
 add_action( 'wp_ajax_nopriv_ws_search_lookups', 'ws_search_handle_lookups' );
@@ -813,36 +858,49 @@ add_action( 'wp_ajax_nopriv_ws_search_lookups', 'ws_search_handle_lookups' );
 // lets the widget kick off indexing the moment a state is picked, so it
 // usually finishes while the user is still typing instead of blocking the
 // search itself.
-function ws_search_handle_warm() {
-	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+// Returns a WP_Error (status in its error data) on bad input instead of
+// sending a response directly, so both the ajax action and the REST route
+// below can share this one implementation and each format the error their
+// own way (wp_send_json() vs. WP_REST_Server's native WP_Error handling).
+function ws_search_warm_data( $state_abbv ) {
 	if ( ! $state_abbv ) {
-		wp_send_json( array( 'error' => 'state is required' ), 400 );
+		return new WP_Error( 'ws_search_missing_state', 'state is required', array( 'status' => 400 ) );
 	}
 
 	set_time_limit( 60 );
 	foreach ( ws_get_license_type_ids() as $license_type_id ) {
 		ws_ensure_indexed( $state_abbv, $license_type_id );
 	}
-	wp_send_json( array( 'warmed' => true ) );
+	return array( 'warmed' => true );
+}
+
+function ws_search_handle_warm() {
+	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+	$result     = ws_search_warm_data( $state_abbv );
+	if ( is_wp_error( $result ) ) {
+		$data = $result->get_error_data();
+		wp_send_json( array( 'error' => $result->get_error_message() ), $data['status'] );
+	}
+	wp_send_json( $result );
 }
 add_action( 'wp_ajax_ws_search_warm', 'ws_search_handle_warm' );
 add_action( 'wp_ajax_nopriv_ws_search_warm', 'ws_search_handle_warm' );
 
-function ws_search_handle_search() {
+// Core "receive a search phrase, return matching product codes" logic —
+// the one piece of this plugin the architecture doc calls out as living
+// behind a real REST endpoint. Shared by the ajax action (below) and the
+// REST route (see ws_search_register_rest_routes()) so there's exactly one
+// implementation of the actual matching behind both.
+function ws_search_query_data( $state_abbv, $q, $limit = 8 ) {
 	global $wpdb;
-	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
-	$q          = isset( $_GET['q'] ) ? trim( sanitize_text_field( wp_unslash( $_GET['q'] ) ) ) : '';
-	$limit      = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 8;
 
 	if ( ! $state_abbv ) {
-		wp_send_json( array( 'error' => 'state is required' ), 400 );
+		return new WP_Error( 'ws_search_missing_state', 'state is required', array( 'status' => 400 ) );
 	}
 	if ( strlen( $q ) < 2 ) {
-		wp_send_json(
-			array(
-				'products' => array(),
-				'total'    => 0,
-			)
+		return array(
+			'products' => array(),
+			'total'    => 0,
 		);
 	}
 
@@ -884,15 +942,115 @@ function ws_search_handle_search() {
 		}
 	);
 
-	wp_send_json(
-		array(
-			'products' => array_slice( $products, 0, $limit ),
-			'total'    => count( $products ),
-		)
+	return array(
+		'products' => array_slice( $products, 0, $limit ),
+		'total'    => count( $products ),
 	);
+}
+
+function ws_search_handle_search() {
+	$state_abbv = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+	$q          = isset( $_GET['q'] ) ? trim( sanitize_text_field( wp_unslash( $_GET['q'] ) ) ) : '';
+	$limit      = isset( $_GET['limit'] ) ? (int) $_GET['limit'] : 8;
+
+	$result = ws_search_query_data( $state_abbv, $q, $limit );
+	if ( is_wp_error( $result ) ) {
+		$data = $result->get_error_data();
+		wp_send_json( array( 'error' => $result->get_error_message() ), $data['status'] );
+	}
+	wp_send_json( $result );
 }
 add_action( 'wp_ajax_ws_search', 'ws_search_handle_search' );
 add_action( 'wp_ajax_nopriv_ws_search', 'ws_search_handle_search' );
+
+// ---------------------------------------------------------------------------
+// REST API — the architecture doc's "WordPress REST endpoint (PHP):
+// receives the search phrase, looks up matches..., returns the matching
+// product codes." The ajax actions above predate this and stay in place
+// (nothing currently calls them stops working), but the widget itself now
+// calls these REST routes instead — see wsSearchConfig.restUrl in
+// ws_search_enqueue_assets() and SEARCH_ENDPOINT/LOOKUPS_ENDPOINT/
+// WARM_ENDPOINT in search-widget.js. All three are public/read-mostly with
+// no side effect beyond the same catalog cache-warming the ajax versions
+// already did, so permission_callback is intentionally '__return_true'.
+// ---------------------------------------------------------------------------
+
+function ws_search_register_rest_routes() {
+	register_rest_route(
+		'ws-course-search/v1',
+		'/search',
+		array(
+			'methods'             => 'GET',
+			'callback'            => 'ws_search_rest_search',
+			'permission_callback' => '__return_true',
+			'args'                => array(
+				'state' => array(
+					'required' => true,
+					'type'     => 'string',
+				),
+				'q'     => array(
+					'required' => true,
+					'type'     => 'string',
+				),
+				'limit' => array(
+					'type'    => 'integer',
+					'default' => 8,
+				),
+			),
+		)
+	);
+
+	register_rest_route(
+		'ws-course-search/v1',
+		'/lookups',
+		array(
+			'methods'             => 'GET',
+			'callback'            => 'ws_search_rest_lookups',
+			'permission_callback' => '__return_true',
+		)
+	);
+
+	register_rest_route(
+		'ws-course-search/v1',
+		'/warm',
+		array(
+			'methods'             => 'GET',
+			'callback'            => 'ws_search_rest_warm',
+			'permission_callback' => '__return_true',
+			'args'                => array(
+				'state' => array(
+					'required' => true,
+					'type'     => 'string',
+				),
+			),
+		)
+	);
+}
+add_action( 'rest_api_init', 'ws_search_register_rest_routes' );
+
+function ws_search_rest_search( WP_REST_Request $request ) {
+	$result = ws_search_query_data(
+		sanitize_text_field( $request->get_param( 'state' ) ),
+		trim( sanitize_text_field( $request->get_param( 'q' ) ) ),
+		(int) $request->get_param( 'limit' )
+	);
+	if ( is_wp_error( $result ) ) {
+		return $result;
+	}
+	return rest_ensure_response( $result );
+}
+
+function ws_search_rest_lookups() {
+	return rest_ensure_response( ws_search_lookups_data() );
+}
+
+function ws_search_rest_warm( WP_REST_Request $request ) {
+	$result = ws_search_warm_data( sanitize_text_field( $request->get_param( 'state' ) ) );
+	if ( is_wp_error( $result ) ) {
+		return $result;
+	}
+	return rest_ensure_response( $result );
+}
 
 // Logs a committed search term (see the JS side's saveRecent() — this rides
 // the same "explicit commit, not every keystroke" moments "recent searches"
@@ -1005,20 +1163,23 @@ add_action( 'wp_ajax_ws_search_embeddings_needed', 'ws_search_handle_embeddings_
 // $wpdb's escaping path is charset-aware and can mangle arbitrary binary
 // bytes on a real MySQL connection, while a base64 string is plain ASCII
 // and immune to that regardless of connection charset.
-function ws_search_handle_save_embeddings() {
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json( array( 'error' => 'forbidden' ), 403 );
-	}
-
-	$body  = json_decode( file_get_contents( 'php://input' ), true );
-	$items = isset( $body['items'] ) && is_array( $body['items'] ) ? $body['items'] : array();
-
+//
+// Shared by both ways embeddings reach this plugin: the admin's browser
+// auto-POSTing what it just computed (ws_search_handle_save_embeddings,
+// below), and a JSON file uploaded on the settings page
+// (ws_search_handle_embeddings_upload) — e.g. from embeddings generated
+// offline by the Claude Code plugin for a subsidiary whose catalog is too
+// large to comfortably compute in one admin's browser tab. Same expected
+// shape either way: {"items": [{"productId","sourceHash","vector"}, ...]}.
+function ws_search_save_embeddings_items( $items ) {
 	global $wpdb;
-	$table = ws_embeddings_table();
-	$saved = 0;
+	$table   = ws_embeddings_table();
+	$saved   = 0;
+	$skipped = 0;
 
-	foreach ( $items as $item ) {
+	foreach ( (array) $items as $item ) {
 		if ( empty( $item['productId'] ) || empty( $item['vector'] ) || empty( $item['sourceHash'] ) ) {
+			++$skipped;
 			continue;
 		}
 		$vector = array_map( 'floatval', (array) $item['vector'] );
@@ -1041,9 +1202,63 @@ function ws_search_handle_save_embeddings() {
 	// own (no separate "release" call needed).
 	set_transient( 'ws_embedding_refresh_lock', 1, WS_EMBEDDING_LOCK_TTL );
 
-	wp_send_json( array( 'saved' => $saved ) );
+	return array(
+		'saved'   => $saved,
+		'skipped' => $skipped,
+	);
+}
+
+function ws_search_handle_save_embeddings() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json( array( 'error' => 'forbidden' ), 403 );
+	}
+
+	$body  = json_decode( file_get_contents( 'php://input' ), true );
+	$items = isset( $body['items'] ) && is_array( $body['items'] ) ? $body['items'] : array();
+
+	wp_send_json( ws_search_save_embeddings_items( $items ) );
 }
 add_action( 'wp_ajax_ws_search_save_embeddings', 'ws_search_handle_save_embeddings' );
+
+// Settings-page file upload: an admin picks a JSON file (the same
+// {"items": [...]} shape ws_search_save_embeddings_items() expects — e.g.
+// generated by the Claude Code embeddings plugin for a subsidiary catalog)
+// and this parses + stores it, entirely server-side, no browser-computed
+// embeddings required for this path.
+function ws_search_handle_embeddings_upload() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'You do not have permission to do that.' );
+	}
+	check_admin_referer( 'ws_search_upload_embeddings' );
+
+	$redirect_args = array( 'page' => 'ws-course-search' );
+
+	if ( empty( $_FILES['ws_embeddings_file']['tmp_name'] ) || UPLOAD_ERR_OK !== $_FILES['ws_embeddings_file']['error'] ) {
+		$redirect_args['ws_embeddings_upload'] = 'error';
+		$redirect_args['message']              = rawurlencode( 'No file was uploaded, or the upload failed.' );
+		wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading an uploaded tmp file, not a remote URL; no HTTP API involved.
+	$contents = file_get_contents( $_FILES['ws_embeddings_file']['tmp_name'] );
+	$body     = json_decode( (string) $contents, true );
+
+	if ( ! is_array( $body ) || ! isset( $body['items'] ) || ! is_array( $body['items'] ) ) {
+		$redirect_args['ws_embeddings_upload'] = 'error';
+		$redirect_args['message']              = rawurlencode( 'That file isn\'t valid — expected JSON shaped like {"items": [{"productId", "sourceHash", "vector"}, ...]}.' );
+		wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
+	$result                                 = ws_search_save_embeddings_items( $body['items'] );
+	$redirect_args['ws_embeddings_upload']   = 'success';
+	$redirect_args['saved']                  = $result['saved'];
+	$redirect_args['skipped']                = $result['skipped'];
+	wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+	exit;
+}
+add_action( 'admin_post_ws_search_upload_embeddings', 'ws_search_handle_embeddings_upload' );
 
 // Raw cosine similarity — these vectors aren't guaranteed pre-normalized,
 // so this uses the full formula rather than a bare dot product.

@@ -1,60 +1,40 @@
 /*
   Palette sampled directly from the reference screenshots:
-  brand blue #2B57B0, light-blue pill #DFE6F3, heading ink #212121,
+  brand blue #2B57B0, accent blue #2559B7 (search bar v2 pill only —
+  button/pin/focus rings), light-blue pill #DFE6F3, heading ink #212121,
   mandatory badge #FAECE1 / #B4794F, elective badge #F2F3F4 / #6B7280.
-
-  Heading font is a placeholder (Poppins) standing in for Western Schools'
-  actual brand typeface — swap once design confirms it.
 */
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap");
 
 .ws-search-hero {
   position: relative;
   max-width: 900px;
   margin: 0 auto;
-  padding: 40px 32px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #eaf1fc 0%, #e3ecfb 100%);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: #212121;
   box-sizing: border-box;
-}
-
-.ws-search__eyebrow {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #2b57b0;
-  min-height: 1em;
-}
-
-.ws-search__heading {
-  margin: 0 0 12px;
-  font-family: "Poppins", system-ui, sans-serif;
-  font-size: 34px;
-  font-weight: 700;
-  color: #212121;
-}
-
-.ws-search__subheading {
-  margin: 0 0 24px;
-  max-width: 560px;
-  font-size: 15px;
-  line-height: 1.5;
-  color: #4b5563;
 }
 
 .ws-search__panel {
   position: relative;
 }
 
+/* Search bar v2 — the three controls used to be separate bordered boxes
+   with gaps between them; this reads as one seamless rounded rectangle
+   via border-radius on the row plus matching radius on the two end
+   segments (not overflow:hidden on the row — that used to clip this
+   into one seamless shape too, but it also clipped the state type-ahead's
+   suggestion dropdown, which lives inside this same row and needs to
+   render outside it). A divider border between segments stands in for
+   the old gaps. Per the mockup, this is a rectangle with modest corner
+   rounding (~8px), not a fully-rounded pill/stadium shape. */
 .ws-search__controls {
   display: flex;
-  gap: 12px;
+  gap: 0;
   align-items: stretch;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
 }
 
 .ws-search__state-wrap {
@@ -62,14 +42,17 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  background: #f3f5f9;
+  border-right: 1px solid #e2e5ea;
+  border-radius: 8px 0 0 8px;
 }
 
 .ws-search__state-icon {
   position: absolute;
-  left: 14px;
-  width: 16px;
-  height: 16px;
-  color: #2b57b0;
+  left: 20px;
+  width: 18px;
+  height: 18px;
+  color: #2559b7;
   display: flex;
   pointer-events: none;
 }
@@ -79,23 +62,40 @@
   height: 100%;
 }
 
+.ws-search__state-chevron {
+  position: absolute;
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  color: #6b7280;
+  display: flex;
+  pointer-events: none;
+}
+
+.ws-search__state-chevron svg {
+  width: 100%;
+  height: 100%;
+}
+
 /* Type-ahead field replacing the old native <select> — dropdowns felt
    "old school" per design feedback, and this recognizes the state as the
    visitor types instead of making them scroll a fixed list. */
 .ws-search__state-input {
-  width: 210px;
-  height: 48px;
-  padding: 12px 14px 12px 38px;
-  border: 1px solid #d0d5dd;
-  border-radius: 8px;
-  font-size: 15px;
+  width: 200px;
+  height: 64px;
+  padding: 14px 36px 14px 48px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 600;
   box-sizing: border-box;
   color: #212121;
 }
 
 .ws-search__state-input:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(43, 87, 176, 0.15);
+  box-shadow: inset 0 0 0 2px rgba(37, 89, 183, 0.25);
 }
 
 .ws-search__state-list {
@@ -148,14 +148,15 @@
   flex: 1 1 280px;
   display: flex;
   align-items: center;
+  background: #fff;
 }
 
 .ws-search__input-icon {
   position: absolute;
-  left: 14px;
-  width: 18px;
-  height: 18px;
-  color: #2b57b0;
+  left: 20px;
+  width: 20px;
+  height: 20px;
+  color: #6b7280;
   display: flex;
   pointer-events: none;
 }
@@ -167,17 +168,21 @@
 
 .ws-search__input {
   width: 100%;
-  height: 48px;
-  padding: 12px 70px 12px 40px;
-  border: 1px solid #d0d5dd;
-  border-radius: 8px;
-  font-size: 16px;
+  height: 64px;
+  padding: 14px 74px 14px 52px;
+  border: none;
+  border-radius: 0;
+  font-size: 17px;
   box-sizing: border-box;
+  background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ws-search__input:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(43, 87, 176, 0.15);
+  box-shadow: inset 0 0 0 2px rgba(37, 89, 183, 0.25);
 }
 
 .ws-search__clear {
@@ -203,26 +208,28 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 48px;
-  padding: 12px 28px;
+  gap: 10px;
+  height: 64px;
+  padding: 16px 40px;
   border: none;
-  border-radius: 8px;
-  background: #2b57b0;
+  border-radius: 0 8px 8px 0;
+  background: #2559b7;
   color: #fff;
   font-size: 15px;
   font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   cursor: pointer;
   box-sizing: border-box;
 }
 
 .ws-search__submit svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .ws-search__submit:hover {
-  background: #234a99;
+  background: #1e4792;
 }
 
 .is-loading .ws-search__submit {
@@ -278,7 +285,7 @@
   gap: 6px;
   padding: 8px 16px;
   border: 1px solid #e2e5ea;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #fff;
   font-size: 14px;
   font-weight: 600;
@@ -330,7 +337,7 @@
 .ws-search__badge {
   flex: 0 0 auto;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -376,7 +383,7 @@
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
   background: #f1ecfb;
@@ -434,28 +441,38 @@
 }
 
 @media (max-width: 640px) {
-  .ws-search-hero {
-    padding: 28px 20px;
-    border-radius: 12px;
-  }
-  .ws-search__heading {
-    font-size: 24px;
-  }
   .ws-search__controls {
     flex-direction: column;
     align-items: stretch;
+    gap: 12px;
+    border-radius: 0;
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
   }
   .ws-search__state-wrap {
     width: 100%;
+    border: 1px solid #d0d5dd;
+    border-right: 1px solid #d0d5dd;
+    border-radius: 8px;
   }
   .ws-search__state-wrap .ws-search__state-input {
     width: 100%;
+    height: 52px;
   }
   .ws-search__input-wrap {
+    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+  }
+  .ws-search__input-wrap .ws-search__input {
+    height: 52px;
   }
   .ws-search__submit {
     width: 100%;
+    height: 52px;
+    border-radius: 8px;
   }
 }

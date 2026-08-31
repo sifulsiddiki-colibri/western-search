@@ -19,18 +19,20 @@
 }
 
 /* Search bar v2 — the three controls used to be separate bordered boxes
-   with gaps between them; this clips them into one seamless rounded
-   rectangle via overflow:hidden + border-radius on the row, with a
-   divider border between segments standing in for the old gaps. Per the
-   mockup, this is a rectangle with modest corner rounding (~8px), not a
-   fully-rounded pill/stadium shape. */
+   with gaps between them; this reads as one seamless rounded rectangle
+   via border-radius on the row plus matching radius on the two end
+   segments (not overflow:hidden on the row — that used to clip this
+   into one seamless shape too, but it also clipped the state type-ahead's
+   suggestion dropdown, which lives inside this same row and needs to
+   render outside it). A divider border between segments stands in for
+   the old gaps. Per the mockup, this is a rectangle with modest corner
+   rounding (~8px), not a fully-rounded pill/stadium shape. */
 .ws-search__controls {
   display: flex;
   gap: 0;
   align-items: stretch;
   flex-wrap: nowrap;
   border-radius: 8px;
-  overflow: hidden;
   background: #fff;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
 }
@@ -42,6 +44,7 @@
   align-items: center;
   background: #f3f5f9;
   border-right: 1px solid #e2e5ea;
+  border-radius: 8px 0 0 8px;
 }
 
 .ws-search__state-icon {
@@ -209,7 +212,7 @@
   height: 64px;
   padding: 16px 40px;
   border: none;
-  border-radius: 0;
+  border-radius: 0 8px 8px 0;
   background: #2559b7;
   color: #fff;
   font-size: 15px;

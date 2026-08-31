@@ -223,8 +223,6 @@
     render() {
       this.root.innerHTML = `
         <div class="ws-search-hero">
-          <p class="ws-search__eyebrow"></p>
-
           <div class="ws-search__panel">
             <div class="ws-search__controls">
               <div class="ws-search__state-wrap">
@@ -272,7 +270,6 @@
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
-      this.eyebrowEl = this.root.querySelector(".ws-search__eyebrow");
       this.recentEl = this.root.querySelector(".ws-search__recent");
       this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
@@ -344,9 +341,7 @@
 
     async loadLookups() {
       try {
-        const { licenseTypes, states } = await fetch(LOOKUPS_ENDPOINT).then(
-          (r) => r.json()
-        );
+        const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
 
         states
           .sort((a, b) => a.stateFullName.localeCompare(b.stateFullName))
@@ -356,8 +351,6 @@
             opt.textContent = s.stateFullName;
             this.stateSelect.appendChild(opt);
           });
-
-        this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
         if (this.context.stateAbbv)
           this.stateSelect.value = this.context.stateAbbv;

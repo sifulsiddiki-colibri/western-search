@@ -75,11 +75,19 @@
   transform: translateX(-50%);
   width: min(760px, calc(100vw - 48px));
   max-height: calc(100vh - 160px);
+  /* One card encompassing everything — the bar, clear/recent-searches,
+     and results all live in normal document flow now (see
+     .ws-search__dropdown / .ws-search__results in search-widget.css),
+     so this box naturally grows to fit them instead of them floating
+     outside it as separate cards. overflow-y:auto is just a safety net
+     for a very short viewport; the results list has its own internal
+     max-height + scroll for a long result set. */
   overflow-y: auto;
+  overflow-x: visible;
   background: #fff;
   border-radius: 16px;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
-  padding: 28px;
+  padding: 24px;
   z-index: 100;
 }
 

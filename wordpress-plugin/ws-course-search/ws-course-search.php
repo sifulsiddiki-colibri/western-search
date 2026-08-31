@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.3
+ * Version:     4.0.4
  * Author:      Siful Siddiki
  */
 
@@ -287,11 +287,37 @@ function ws_search_register_settings() {
 }
 add_action( 'admin_init', 'ws_search_register_settings' );
 
+function ws_search_render_embeddings_upload_notice() {
+	if ( ! isset( $_GET['ws_embeddings_upload'] ) ) {
+		return;
+	}
+
+	if ( 'success' === $_GET['ws_embeddings_upload'] ) {
+		$saved   = isset( $_GET['saved'] ) ? (int) $_GET['saved'] : 0;
+		$skipped = isset( $_GET['skipped'] ) ? (int) $_GET['skipped'] : 0;
+		printf(
+			'<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+			esc_html(
+				sprintf(
+					'Embeddings uploaded: %d saved%s.',
+					$saved,
+					$skipped > 0 ? ", {$skipped} skipped (missing productId/vector/sourceHash)" : ''
+				)
+			)
+		);
+	} elseif ( 'error' === $_GET['ws_embeddings_upload'] ) {
+		$message = isset( $_GET['message'] ) ? sanitize_text_field( wp_unslash( rawurldecode( $_GET['message'] ) ) ) : 'Upload failed.';
+		printf( '<div class="notice notice-error is-dismissible"><p>%s</p></div>', esc_html( $message ) );
+	}
+}
+
 function ws_search_render_settings_page() {
 	?>
 	<div class="wrap">
 		<h1>WS Course Search</h1>
 		<p>Keyword and typo-tolerant search run automatically — no configuration needed.</p>
+
+		<?php ws_search_render_embeddings_upload_notice(); ?>
 
 		<h2>Semantic search</h2>
 		<form action="options.php" method="post">
@@ -323,6 +349,22 @@ function ws_search_render_settings_page() {
 			Refresh search embeddings
 		</button>
 		<p id="ws-embeddings-status"></p>
+
+		<h3>Or upload embeddings generated elsewhere</h3>
+		<p class="description">
+			For a catalog too large to comfortably compute in one browser tab
+			(e.g. another subsidiary's), generate embeddings offline — the
+			Claude Code plugin under <code>claude-plugins/embeddings-generator/</code>
+			in this repo does this — and upload the resulting JSON file here
+			instead. Expected shape:
+			<code>{"items": [{"productId", "sourceHash", "vector"}, ...]}</code>.
+		</p>
+		<form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post" enctype="multipart/form-data">
+			<?php wp_nonce_field( 'ws_search_upload_embeddings' ); ?>
+			<input type="hidden" name="action" value="ws_search_upload_embeddings" />
+			<input type="file" name="ws_embeddings_file" accept="application/json,.json" required />
+			<?php submit_button( 'Upload embeddings JSON', 'secondary' ); ?>
+		</form>
 	</div>
 	<?php
 }
@@ -335,7 +377,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.3',
+		'4.0.4',
 		true
 	);
 	wp_localize_script(
@@ -365,20 +407,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.3'
+		'4.0.4'
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.3',
+		'4.0.4',
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.3',
+		'4.0.4',
 		true
 	);
 }
@@ -1121,20 +1163,23 @@ add_action( 'wp_ajax_ws_search_embeddings_needed', 'ws_search_handle_embeddings_
 // $wpdb's escaping path is charset-aware and can mangle arbitrary binary
 // bytes on a real MySQL connection, while a base64 string is plain ASCII
 // and immune to that regardless of connection charset.
-function ws_search_handle_save_embeddings() {
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json( array( 'error' => 'forbidden' ), 403 );
-	}
-
-	$body  = json_decode( file_get_contents( 'php://input' ), true );
-	$items = isset( $body['items'] ) && is_array( $body['items'] ) ? $body['items'] : array();
-
+//
+// Shared by both ways embeddings reach this plugin: the admin's browser
+// auto-POSTing what it just computed (ws_search_handle_save_embeddings,
+// below), and a JSON file uploaded on the settings page
+// (ws_search_handle_embeddings_upload) — e.g. from embeddings generated
+// offline by the Claude Code plugin for a subsidiary whose catalog is too
+// large to comfortably compute in one admin's browser tab. Same expected
+// shape either way: {"items": [{"productId","sourceHash","vector"}, ...]}.
+function ws_search_save_embeddings_items( $items ) {
 	global $wpdb;
-	$table = ws_embeddings_table();
-	$saved = 0;
+	$table   = ws_embeddings_table();
+	$saved   = 0;
+	$skipped = 0;
 
-	foreach ( $items as $item ) {
+	foreach ( (array) $items as $item ) {
 		if ( empty( $item['productId'] ) || empty( $item['vector'] ) || empty( $item['sourceHash'] ) ) {
+			++$skipped;
 			continue;
 		}
 		$vector = array_map( 'floatval', (array) $item['vector'] );
@@ -1157,9 +1202,63 @@ function ws_search_handle_save_embeddings() {
 	// own (no separate "release" call needed).
 	set_transient( 'ws_embedding_refresh_lock', 1, WS_EMBEDDING_LOCK_TTL );
 
-	wp_send_json( array( 'saved' => $saved ) );
+	return array(
+		'saved'   => $saved,
+		'skipped' => $skipped,
+	);
+}
+
+function ws_search_handle_save_embeddings() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json( array( 'error' => 'forbidden' ), 403 );
+	}
+
+	$body  = json_decode( file_get_contents( 'php://input' ), true );
+	$items = isset( $body['items'] ) && is_array( $body['items'] ) ? $body['items'] : array();
+
+	wp_send_json( ws_search_save_embeddings_items( $items ) );
 }
 add_action( 'wp_ajax_ws_search_save_embeddings', 'ws_search_handle_save_embeddings' );
+
+// Settings-page file upload: an admin picks a JSON file (the same
+// {"items": [...]} shape ws_search_save_embeddings_items() expects — e.g.
+// generated by the Claude Code embeddings plugin for a subsidiary catalog)
+// and this parses + stores it, entirely server-side, no browser-computed
+// embeddings required for this path.
+function ws_search_handle_embeddings_upload() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'You do not have permission to do that.' );
+	}
+	check_admin_referer( 'ws_search_upload_embeddings' );
+
+	$redirect_args = array( 'page' => 'ws-course-search' );
+
+	if ( empty( $_FILES['ws_embeddings_file']['tmp_name'] ) || UPLOAD_ERR_OK !== $_FILES['ws_embeddings_file']['error'] ) {
+		$redirect_args['ws_embeddings_upload'] = 'error';
+		$redirect_args['message']              = rawurlencode( 'No file was uploaded, or the upload failed.' );
+		wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading an uploaded tmp file, not a remote URL; no HTTP API involved.
+	$contents = file_get_contents( $_FILES['ws_embeddings_file']['tmp_name'] );
+	$body     = json_decode( (string) $contents, true );
+
+	if ( ! is_array( $body ) || ! isset( $body['items'] ) || ! is_array( $body['items'] ) ) {
+		$redirect_args['ws_embeddings_upload'] = 'error';
+		$redirect_args['message']              = rawurlencode( 'That file isn\'t valid — expected JSON shaped like {"items": [{"productId", "sourceHash", "vector"}, ...]}.' );
+		wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+		exit;
+	}
+
+	$result                                 = ws_search_save_embeddings_items( $body['items'] );
+	$redirect_args['ws_embeddings_upload']   = 'success';
+	$redirect_args['saved']                  = $result['saved'];
+	$redirect_args['skipped']                = $result['skipped'];
+	wp_safe_redirect( add_query_arg( $redirect_args, admin_url( 'options-general.php' ) ) );
+	exit;
+}
+add_action( 'admin_post_ws_search_upload_embeddings', 'ws_search_handle_embeddings_upload' );
 
 // Raw cosine similarity — these vectors aren't guaranteed pre-normalized,
 // so this uses the full formula rather than a bare dot product.

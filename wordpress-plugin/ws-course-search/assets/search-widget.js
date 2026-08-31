@@ -302,8 +302,6 @@
               </div>`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
-          <p class="ws-search__eyebrow"></p>
-
           <div class="ws-search__panel">
             <div class="ws-search__controls">
               ${stateFieldHtml}
@@ -347,7 +345,6 @@
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
-      this.eyebrowEl = this.root.querySelector(".ws-search__eyebrow");
       this.recentEl = this.root.querySelector(".ws-search__recent");
       this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
@@ -532,13 +529,9 @@
 
     async loadLookups() {
       try {
-        const { licenseTypes, states } = await fetch(LOOKUPS_ENDPOINT).then(
-          (r) => r.json()
-        );
+        const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
 
         this.states = states.sort((a, b) => a.stateFullName.localeCompare(b.stateFullName));
-
-        this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
         // Pre-fill from a prior visit (localStorage) or an explicit
         // defaultState option, same as before — just resolving the

@@ -1,0 +1,8 @@
+{
+  "name": "ws-embeddings-generator",
+  "version": "1.0.0",
+  "description": "Generates catalog embeddings compatible with the ws-course-search WordPress plugin's semantic search, for Western Schools or any other Colibri subsidiary's catalog.",
+  "author": {
+    "name": "Siful Siddiki"
+  }
+}

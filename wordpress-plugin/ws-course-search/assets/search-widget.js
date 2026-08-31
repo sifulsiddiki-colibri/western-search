@@ -188,6 +188,66 @@
       this.render();
       if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
       this.loadLookups().then(() => this.applyInitialQuery());
+
+      // Every ws-course-search block on the same page mirrors the same
+      // state and search query — deliberate, not the older per-instance
+      // independence this widget used to guarantee (see the storageKey/
+      // recentKey comment above, which still keeps each instance's own
+      // *saved* recent-searches/localStorage separate; this is just live
+      // in-memory mirroring for as long as the page stays open).
+      this._applyingRemoteSync = false;
+      this._handleRemoteSync = (e) => this.handleRemoteSync(e);
+      document.addEventListener("ws-search:sync", this._handleRemoteSync);
+    }
+
+    // Tells every other WSCourseSearch instance on the page about a
+    // state/query change this instance just made. No-ops while this
+    // instance is itself in the middle of applying someone else's
+    // broadcast, so two instances can't ping-pong the same change back
+    // and forth forever.
+    broadcastSync(detail) {
+      if (this._applyingRemoteSync) return;
+      document.dispatchEvent(
+        new CustomEvent("ws-search:sync", { detail: { source: this, ...detail } })
+      );
+    }
+
+    // Applies another instance's broadcasted state/query to this one.
+    // Mirrors the same effects selectState()/onInput() would have had,
+    // without re-broadcasting (that's what _applyingRemoteSync guards).
+    handleRemoteSync(e) {
+      if (e.detail.source === this) return;
+
+      this._applyingRemoteSync = true;
+      try {
+        if ("stateAbbv" in e.detail) {
+          this.context.stateAbbv = e.detail.stateAbbv;
+          this.stateInput.value = e.detail.stateFullName || "";
+          this.saveContext();
+          this.closeStateSuggestions();
+          if (e.detail.stateAbbv) this.warmState(e.detail.stateAbbv);
+        }
+
+        if ("query" in e.detail) {
+          this.input.value = e.detail.query;
+          this.clearBtn.hidden = !e.detail.query;
+        }
+
+        if ("stateAbbv" in e.detail || "query" in e.detail) {
+          const query = this.input.value.trim();
+          if (!query) {
+            this.closeResults();
+            this.renderRecent();
+          } else if (query.length < MIN_QUERY_LENGTH) {
+            this.closeResults();
+          } else {
+            this.showLoading();
+            this.runSearch();
+          }
+        }
+      } finally {
+        this._applyingRemoteSync = false;
+      }
     }
 
     // Indexing a state a user hasn't searched yet costs several real
@@ -396,6 +456,7 @@
       // there looking frozen.
       if (this.input.value.trim()) this.showLoading();
       this.runSearch();
+      this.broadcastSync({ stateAbbv: state.stateAbbv, stateFullName: state.stateFullName });
     }
 
     wireStateInput() {
@@ -554,15 +615,20 @@
       if (!query) {
         this.closeResults();
         this.renderRecent();
+        this.broadcastSync({ query });
         return;
       }
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
+        this.broadcastSync({ query });
         return;
       }
 
       this.showLoading();
-      this.debounceTimer = setTimeout(() => this.runSearch(), DEBOUNCE_MS);
+      this.debounceTimer = setTimeout(() => {
+        this.runSearch();
+        this.broadcastSync({ query });
+      }, DEBOUNCE_MS);
     }
 
     // Navigates to the "view all results" page instead of expanding the

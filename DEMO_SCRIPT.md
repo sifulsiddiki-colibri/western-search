@@ -1,141 +1,174 @@
-# WS Course Search — Demo Script
+# WS Course Search — 5-Minute Demo Script
 
-**Scope of this demo:** the Gutenberg block + live search only. Not covered:
-grouped Courses/Bundles results view, search analytics UI, semantic/AI search
-(none built for this pass — see "If asked" below).
+**Scope of this demo:** two things, back to back — the redesigned header
+search (the homepage/view-all recreation, repo-root prototype) and the
+Gutenberg block that ships the same search into real WordPress pages. Not
+covered: grouped Courses/Bundles results view, search analytics UI,
+semantic/AI search (see "If asked" below).
 
 ## Before you go live
 
-- Confirm the local server is up: `curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8090/` should print `200`.
-  If it's down, restart it from the WP root: `cd /private/tmp/ws-wp-test && php -S localhost:8090`
-- Admin login (only needed if you're showing the block editor): `admin` / `demo-pass-123`
+**Homepage popup search (repo root, port 8080)**
+- Confirm it's up: `curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/` → should print `200`.
+- If it's down or you edited any CSS/JS: `lsof -ti :8080 | xargs kill` then `npm start` from the repo root (this server does **not** hot-reload).
+- No manual cache warm needed — it pre-warms all state/profession combos in the background on startup (168 combos, a few seconds after boot).
+- Demo page: `http://localhost:8080/` — click the magnifying glass next to the cart to open the search.
+- Clear localStorage first if you tested recently (`localStorage.clear()` in devtools, then reload) so the state field starts on "Select your state" and there's no leftover "recent searches" clutter.
+
+**Gutenberg block / WordPress (local WP instance, port 8090)**
+- Confirm it's up: `curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8090/` → should print `200`.
+- If it's down, restart it: `cd /private/tmp/ws-wp-test && php -S localhost:8090`
+- Admin login (only needed to show the block editor): `admin` / `demo-pass-123`
 - Demo page (front end): `http://localhost:8090/?page_id=19`
 - Demo page (editor): `http://localhost:8090/wp-admin/post.php?post=19&action=edit`
-- If it's been hours since you last searched FL/NY on this instance, re-warm the cache so the first live query doesn't pause for a few seconds waiting on the real course-catalog API:
+- Re-warm the cache if it's been hours since you last searched FL on this instance, so the first live query doesn't pause a few seconds on the real course-catalog API:
   `curl -s "http://localhost:8090/wp-admin/admin-ajax.php?action=ws_search_warm&state=FL"`
+
+**Search terms to have ready (type these live, don't paste):**
+- `ca` — shows live-as-you-type suggestions appearing immediately, before you finish typing
+- `cardic` — intentional typo for "cardiac," the typo-tolerance "wow" moment
+- `zzznonexistentqueryzzz` — the honest zero-result case
+- State to pick: **Florida**
 
 ---
 
-## 1. Open with the one-liner
+## 1. Open with the one-liner (0:00–0:45)
 
-> "This is the course search widget for the site redesign — it's a real
-> Gutenberg block anyone on the content team can drop into a page, and it
-> does typo-tolerant search against the live course catalog with no
-> external search service running anywhere."
+> "This is the new course search — same search engine, two places it
+> shows up. First, the redesigned header search on the site itself.
+> Second, the same thing packaged as a WordPress block anyone on the
+> content team can drop into a page. No external search service behind
+> either one — it's typo-tolerant search against the live course catalog,
+> running in code we own."
 
-## 2. Show it's a real block, not just a shortcode
+## 2. Homepage popup search — the main event (0:45–2:45)
 
-Open the editor page. Point at the block already on the page:
+Go to `http://localhost:8080/`. Click the magnifying glass icon next to
+the cart.
 
-> "This box is the 'WS Course Search' block. It's a *dynamic* block — the
-> editor shows this placeholder instead of a live preview because the
-> real markup only exists on the actual front end, but it's registered
-> like any other block."
+> "Clicking the search icon opens this panel — one box holding
+> everything: state, search, and results, so it reads as a single piece
+> of UI rather than floating pieces."
+
+Point out the state field says "Select your state" — never pre-filled.
+
+> "It never defaults to a state — course availability and pricing are
+> state-specific, so we don't want to guess wrong."
+
+Select **Florida** from the dropdown.
+
+Type **`ca`** slowly, letter by letter.
+
+> "Watch — it's already showing matches after two letters. No need to
+> finish typing or hit enter."
+
+Clear it, then type **`cardic`** (the intentional typo).
+
+> "And here's the one that always lands — I misspelled 'cardiac' and it
+> still found the right course: Cardiac Rehabilitation. That's
+> Levenshtein-distance typo tolerance, tuned to scale with word length —
+> short words need an exact match, longer ones tolerate a slip or two.
+> Same idea Algolia or Elasticsearch use, just running here with no
+> external search infrastructure."
+
+Point out the rectangular "ELECTIVE" badges and the layout — mention this
+was pixel-matched against the design mockup (color, corner radius, one
+unified panel) rather than eyeballed.
+
+Click a result (or "Search") to show it lands on the recreated "view all"
+results page, still wired to the same live search.
+
+## 3. The Gutenberg block — same engine, WordPress packaging (2:45–4:15)
+
+Switch to `http://localhost:8090/wp-admin/post.php?post=19&action=edit`.
+
+> "This is the exact same search, but packaged as a real Gutenberg block
+> so anyone on the content team can add it to any page — no code, no
+> shortcode to memorize."
 
 Click the **+** inserter, type "WS Course Search" to show it appear in the
-list — proves it's a first-class block in the inserter, not a workaround.
+block list.
 
-> "Anyone on the content team can add this to any page the same way they'd
-> add a paragraph or an image — no code, no shortcode to memorize."
+> "It's a *dynamic* block — the editor shows this placeholder instead of a
+> live preview because the real markup only renders on the front end, but
+> it's a first-class registered block, not a workaround."
 
 (Optional, only if asked: "It also still works as a `[ws_course_search]`
 shortcode for older pages — both call the exact same rendering code, so
-they can never drift apart.")
+they can't drift apart.")
 
-## 3. Front end — the state-gate
+Switch to the front end (`?page_id=19`). Type "flo" into the state field
+to show the type-ahead narrowing to Florida — this copy of the widget uses
+a type-ahead text field instead of the homepage's dropdown.
 
-Switch to the front-end tab (`?page_id=19`). If localStorage has a
-leftover state from earlier testing, clear it first (`localStorage.clear()`
-in devtools, then reload) so it starts clean.
+> "Same search behavior, same typo tolerance — just a different state
+> picker, because this version needed to handle a much longer state list
+> inline on a content page."
 
-> "It always starts on 'Select your state' — never a hardcoded default —
-> because course availability and pricing are state-specific, and we don't
-> want to show someone the wrong state's catalog by accident."
+## 4. Show the honest failure case (4:15–4:45)
 
-Type "flo" into the state field — show the type-ahead narrowing to Florida,
-select it with a click or arrow keys + Enter.
+Type **`zzznonexistentqueryzzz`** in either instance.
 
-## 4. The actual search — lead with typo tolerance
+> "And it fails gracefully — a clear 'no courses found' message, not a
+> blank box or an error. That's a tested path, not just the happy path."
 
-Type **"cardic"** (intentional typo) into the search box.
+## 5. Close honestly — what's still open (4:45–5:00)
 
-> "Watch — I misspelled 'cardiac' and it still found the right course."
-
-Result: **"Cardiac Rehabilitation: The Nurses' Integral Role in Heart
-Recovery"** shows up. This is the single best "wow" beat in the demo —
-it's a real product, not a canned mockup.
-
-> "That's Levenshtein-distance typo tolerance, tuned to scale with word
-> length — short words need an exact match, longer ones tolerate one or
-> two character slips. It's the same idea Algolia and Elasticsearch use,
-> just running in plain PHP with no external search infrastructure."
-
-## 5. Show the honest failure case too
-
-Clear the box, type something that shouldn't match anything real, e.g.
-**"zzznonexistentqueryzzz"**.
-
-> "And it fails gracefully — a clear 'no courses found' message instead of
-> a blank box or an error."
-
-This matters because it proves the zero-result path was actually built and
-tested, not just the happy path.
-
-## 6. Why no external search service (if they ask "what's this built on")
-
-> "There's no Meilisearch, no separate search server, no third-party API
-> for this. Catalog data lives in two tables this plugin owns. Keyword
-> search and typo tolerance run in plain PHP. That was a deliberate call —
-> there wasn't an approved place to host a persistent search service for
-> this deployment, and the project's own history had already tried a
-> hand-rolled index and an LLM-judges-relevance approach and found both
-> worse than just doing this properly."
-
-## 7. The integration hand-off (mention, don't over-explain unless asked)
-
-> "When a search finishes, the widget fires one browser event with just
-> the matched product codes — nothing else. Whatever the listings-filtering
-> team builds downstream decides what to do with those codes; the widget
-> doesn't reach into their code and their code doesn't reach into the
-> widget's rendering."
-
-## 8. Close honestly — what's still open
-
-Don't oversell. End with the real state of things:
-
-> "Three things are still open, not blocking this demo but worth flagging:
-> we're logging search terms to a new table, but that landed without an
-> explicit sign-off from Ben and Sara on where that data should live long
-> term. There's a question about whether a zero-result search should fire
-> its own event downstream — that's unspecified either way right now. And
-> there's an architecture conversation still pending with Sara about
+> "A few things still open, not blocking today: the grouped
+> Courses/Bundles results view from the design isn't built yet — needs a
+> data-model change we haven't scoped. Search-term analytics logging
+> landed without explicit sign-off on where that data should live
+> long-term. And there's a pending architecture conversation about
 > search-phrase-in-URL versus resolving it live in the browser."
+
+---
 
 ## If asked about semantic ("AI") search
 
 The plugin has a semantic-search code path (embeddings computed in the
 visitor's/admin's own browser, no server-side model) already built and
-wired up, but **no embeddings have been generated on this local instance**,
-so it has nothing to show live right now. Be straightforward about that:
+wired up, but **no embeddings have been generated on the WP test
+instance**, so it has nothing to show live right now.
 
 > "There's a meaning-based search layer built in — it'd catch something
 > like 'back pain course' matching 'Low Back Pain' with zero literal word
-> overlap — but it needs a one-time embeddings pass from Settings that
-> hasn't been run on this test instance. Happy to turn that on and show it
-> in a follow-up."
+> overlap — but it needs a one-time embeddings pass that hasn't been run
+> on this test instance. Happy to turn that on and show it in a
+> follow-up."
 
 Don't try to demo this live unless it's been explicitly prepared first —
 running the refresh cold, live, downloads a ~30MB model and computes
 hundreds of embeddings in-browser, which is a bad thing to be waiting on
 in front of people.
 
+## If asked "why no external search service"
+
+> "There's no Meilisearch, no separate search server, no third-party API.
+> Catalog data lives in tables this plugin/prototype owns. Keyword search
+> and typo tolerance run in plain code. That was a deliberate call —
+> there wasn't an approved place to host a persistent search service for
+> this deployment, and earlier attempts at a hand-rolled index and an
+> LLM-judges-relevance approach both turned out worse than doing this
+> properly."
+
+## If asked about the integration hand-off
+
+> "When a search finishes, the widget fires one browser event with just
+> the matched product codes — nothing else. Whatever downstream code
+> filters listings decides what to do with those codes; the widget
+> doesn't reach into that code and it doesn't reach into the widget."
+
 ## Anticipated questions
 
 - **"Does this work on mobile?"** — Yes, the bar collapses to stacked
   boxes below a breakpoint; state/search/button each get their own row.
-- **"What happens with more than one of these on a page?"** — Fully
-  independent instances (unique container ids, namespaced localStorage) —
-  verified with two blocks + a shortcode on the same test page.
-- **"Is this live on the real site?"** — No, this is `test-api-ms` /
-  local WordPress. Production Marketing API host and the real
-  view-all-page search-quality gap are both still open items.
+- **"What happens with more than one of these on a page?"** (WP block) —
+  Fully independent instances (unique container ids, namespaced
+  localStorage) — verified with two blocks + a shortcode on the same test
+  page.
+- **"Is this live on the real site?"** — No. The homepage popup is a
+  local recreation of westernschools.com's real header/hero (the search
+  icon itself is this demo's own addition, not on the live site). The WP
+  block is on `test-api-ms` / local WordPress. Production Marketing API
+  host and the real view-all-page search-quality gap are both still open
+  items.

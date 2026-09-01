@@ -250,7 +250,11 @@
     // "explicit commit" (Enter, Search button, picking a result), never a
     // raw keystroke, so this piggybacks on that instead of needing its own
     // debounce. Fire-and-forget: a dropped log shouldn't ever block or
-    // visibly affect the search itself.
+    // visibly affect the search itself. keepalive is required, not
+    // decorative — every call site immediately triggers a same-tick
+    // navigation (goToViewAll() or a result link's default click), which
+    // would otherwise abort a normal in-flight fetch before it reaches the
+    // server.
     logSearchTerm(query) {
       if (!LOG_TERM_ENDPOINT || !query) return;
       fetch(LOG_TERM_ENDPOINT, {
@@ -261,6 +265,7 @@
           stateAbbv: this.context.stateAbbv,
           resultCount: this.lastTotal,
         }),
+        keepalive: true,
       }).catch(() => {});
     }
 

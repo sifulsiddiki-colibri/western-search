@@ -155,6 +155,7 @@
   const CLOCK_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const SPARKLE_ICON = `<svg viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 2l1.2 4.8L16 8l-4.8 1.2L10 14l-1.2-4.8L4 8l4.8-1.2L10 2z"/><path d="M16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6L16 13z"/></svg>`;
   const PIN_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 18s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/></svg>`;
+  const CHEVRON_ICON = `<svg viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   class WSCourseSearch {
     constructor(root, options) {
@@ -301,14 +302,11 @@
                   aria-expanded="false"
                   aria-owns="${stateListId}"
                 />
+                <span class="ws-search__state-chevron" aria-hidden="true">${CHEVRON_ICON}</span>
                 <ul class="ws-search__state-list" id="${stateListId}" hidden></ul>
               </div>`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
-          <p class="ws-search__eyebrow"></p>
-          <h2 class="ws-search__heading">What are you looking to learn today?</h2>
-          <p class="ws-search__subheading">Search our full library of board-approved courses, bundles, and membership plans.</p>
-
           <div class="ws-search__panel">
             <div class="ws-search__controls">
               ${stateFieldHtml}
@@ -352,7 +350,6 @@
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
-      this.eyebrowEl = this.root.querySelector(".ws-search__eyebrow");
       this.recentEl = this.root.querySelector(".ws-search__recent");
       this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
@@ -537,13 +534,9 @@
 
     async loadLookups() {
       try {
-        const { licenseTypes, states } = await fetch(LOOKUPS_ENDPOINT).then(
-          (r) => r.json()
-        );
+        const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
 
         this.states = states.sort((a, b) => a.stateFullName.localeCompare(b.stateFullName));
-
-        this.eyebrowEl.textContent = `Search CE courses across ${licenseTypes.length} professions`;
 
         // Pre-fill from a prior visit (localStorage) or an explicit
         // defaultState option, same as before — just resolving the

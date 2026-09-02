@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.0
+ * Version:     4.0.3
  * Author:      Siful Siddiki
  */
 
@@ -335,7 +335,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.0',
+		'4.0.3',
 		true
 	);
 	wp_localize_script(
@@ -365,20 +365,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.0'
+		'4.0.3'
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.0',
+		'4.0.3',
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.0',
+		'4.0.3',
 		true
 	);
 }

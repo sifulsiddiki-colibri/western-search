@@ -53,7 +53,6 @@
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STATE_SUGGESTION_LIMIT = 8;
-  const STORAGE_KEY = "wsSearchContext";
   const RECENT_KEY = "wsSearchRecent";
   const MAX_RECENT = 5;
 
@@ -177,9 +176,7 @@
       this.professionSlug = this.options.defaultProfession || "nursing";
       this.states = []; // populated by loadLookups(); read by the state type-ahead before then is just empty.
       // Namespaced by container id so two instances on the same page never
-      // share "recent searches" or a remembered state — each is its own
-      // independent widget, per the multi-instance requirement.
-      this.storageKey = `${STORAGE_KEY}:${this.root.id}`;
+      // share "recent searches," per the multi-instance requirement.
       this.recentKey = `${RECENT_KEY}:${this.root.id}`;
 
       this.context = this.loadContext();
@@ -212,21 +209,13 @@
       }
     }
 
-    // Starts on the "Select your state" placeholder (per the Search v2
-    // design) unless a state was already chosen in a prior visit
-    // (localStorage) or the embedder explicitly passed a defaultState
-    // option — no hardcoded fallback state.
+    // Always starts on the "Select your state" placeholder (per the
+    // Search v2 design and an explicit, repeated product requirement) —
+    // never restored from a prior visit, only from the embedder
+    // explicitly passing a defaultState option (e.g. a state-specific
+    // listings page). No hardcoded fallback state either way.
     loadContext() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(this.storageKey) || "{}");
-        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
-      } catch (e) {
-        return { stateAbbv: this.options.defaultState || "" };
-      }
-    }
-
-    saveContext() {
-      localStorage.setItem(this.storageKey, JSON.stringify(this.context));
+      return { stateAbbv: this.options.defaultState || "" };
     }
 
     loadRecent() {
@@ -391,7 +380,6 @@
     selectState(state) {
       this.context.stateAbbv = state.stateAbbv;
       this.stateInput.value = state.stateFullName;
-      this.saveContext();
       this.closeStateSuggestions();
       this.warmState(state.stateAbbv);
       // A state that hasn't been searched in a while pays a real,
@@ -439,7 +427,10 @@
               s.stateAbbv.toLowerCase().startsWith(q)
           );
 
-      this.stateSuggestions = matches.slice(0, STATE_SUGGESTION_LIMIT);
+      // Browsing with no query yet: show every state (the list scrolls,
+      // see .ws-search__state-list's max-height/overflow-y in the CSS).
+      // Once the visitor types, narrow to a short list of matches.
+      this.stateSuggestions = q ? matches.slice(0, STATE_SUGGESTION_LIMIT) : matches;
       this.stateActiveIndex = -1;
 
       if (!this.stateSuggestions.length) {

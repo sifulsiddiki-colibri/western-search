@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.3
+ * Version:     4.0.6
  * Author:      Siful Siddiki
  */
 
@@ -227,9 +227,10 @@ function ws_search_start_prewarm_sweep() {
 add_action( 'ws_search_prewarm_sweep', 'ws_search_start_prewarm_sweep' );
 
 // Processes one bounded batch, then self-chains a single event a minute
-// out to continue. ws_ensure_indexed() already no-ops quickly for combos
-// that are still fresh, so re-sweeping already-warm combos costs almost
-// nothing — only genuinely stale/missing ones pay the real fetch cost.
+// out to continue. ws_ensure_indexed_pairs() already no-ops quickly for
+// combos that are still fresh, so re-sweeping already-warm combos costs
+// almost nothing — only genuinely stale/missing ones pay the real fetch
+// cost, and this batch's stale ones fetch concurrently with each other.
 function ws_search_run_prewarm_batch() {
 	$combos = ws_search_get_all_combos();
 	$total  = count( $combos );
@@ -241,11 +242,12 @@ function ws_search_run_prewarm_batch() {
 	$progress = (int) get_option( 'ws_prewarm_progress', 0 );
 	set_time_limit( 55 );
 
-	$batch_size = min( WS_PREWARM_BATCH_SIZE, $total );
+	$batch_size  = min( WS_PREWARM_BATCH_SIZE, $total );
+	$batch_pairs = array();
 	for ( $i = 0; $i < $batch_size; $i++ ) {
-		list( $state_abbv, $license_type_id ) = $combos[ ( $cursor + $i ) % $total ];
-		ws_ensure_indexed( $state_abbv, $license_type_id );
+		$batch_pairs[] = $combos[ ( $cursor + $i ) % $total ];
 	}
+	ws_ensure_indexed_pairs( $batch_pairs );
 
 	$progress += $batch_size;
 	update_option( 'ws_prewarm_cursor', ( $cursor + $batch_size ) % $total, false );
@@ -335,7 +337,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.3',
+		'4.0.6',
 		true
 	);
 	wp_localize_script(
@@ -365,20 +367,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.3'
+		'4.0.6'
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.3',
+		'4.0.6',
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.3',
+		'4.0.6',
 		true
 	);
 }
@@ -543,39 +545,93 @@ function ws_get_license_type_ids() {
 	return wp_list_pluck( ws_get_license_types(), 'licenseTypeId' );
 }
 
-function ws_fetch_all_products( $state_abbv, $license_type_id ) {
-	$products = array();
-	$offset   = 0;
+// (state, licenseTypeId) pairs for every license type, for the common
+// "just indexed one state" case — passed straight to ws_ensure_indexed_pairs()
+// so all of a state's license types fetch concurrently instead of one at a time.
+function ws_state_license_pairs( $state_abbv ) {
+	return array_map(
+		function ( $license_type_id ) use ( $state_abbv ) {
+			return array( $state_abbv, $license_type_id );
+		},
+		ws_get_license_type_ids()
+	);
+}
 
-	while ( true ) {
-		$url = add_query_arg(
-			array(
-				'stateAbbvs'     => $state_abbv,
-				'licenseTypeIds' => $license_type_id,
-				'offset'         => $offset,
-				'limit'          => WS_CATALOG_PAGE_SIZE,
-			),
-			WS_MARKETING_API_BASE . '/marketing/products/withfilters'
+// Fetches and indexes any number of (state, licenseTypeId) combos
+// concurrently — one HTTP request per not-yet-finished combo per
+// pagination round (via WpOrg\Requests\Requests::request_multiple(),
+// the same Requests library wp_remote_get() itself uses under the hood),
+// instead of fully paginating one combo before starting the next.
+// Measured against the live Marketing API: warming a single state's 3
+// license types serially took ~15-28s, almost entirely network round-trip
+// time rather than local work — running those round-trips concurrently is
+// what actually cuts the wall-clock, roughly N-fold for N combos with
+// similar page counts.
+function ws_fetch_and_index_combos( $pairs ) {
+	$combos = array();
+	foreach ( $pairs as $pair ) {
+		list( $state_abbv, $license_type_id ) = $pair;
+		$combos[ "{$state_abbv}\t{$license_type_id}" ] = array(
+			'state_abbv'      => $state_abbv,
+			'license_type_id' => $license_type_id,
+			'offset'          => 0,
+			'products'        => array(),
+			'done'            => false,
 		);
-		$result  = ws_fetch_json( $url );
-		$data    = $result['data'];
-		$headers = $result['headers'];
-
-		if ( ! empty( $data['products'] ) ) {
-			$products = array_merge( $products, $data['products'] );
-		}
-
-		$pagination = null;
-		if ( isset( $headers['x-pagination'] ) ) {
-			$pagination = json_decode( $headers['x-pagination'], true );
-		}
-		if ( ! $pagination || empty( $pagination['hasMore'] ) || ! isset( $pagination['nextOffset'] ) ) {
-			break;
-		}
-		$offset = $pagination['nextOffset'];
 	}
 
-	return $products;
+	while ( true ) {
+		$pending = array_filter(
+			$combos,
+			function ( $c ) {
+				return ! $c['done'];
+			}
+		);
+		if ( empty( $pending ) ) {
+			break;
+		}
+
+		$requests = array();
+		foreach ( $pending as $combo_key => $c ) {
+			$requests[ $combo_key ] = array(
+				'url'  => add_query_arg(
+					array(
+						'stateAbbvs'     => $c['state_abbv'],
+						'licenseTypeIds' => $c['license_type_id'],
+						'offset'         => $c['offset'],
+						'limit'          => WS_CATALOG_PAGE_SIZE,
+					),
+					WS_MARKETING_API_BASE . '/marketing/products/withfilters'
+				),
+				'type' => 'GET',
+			);
+		}
+
+		$responses = \WpOrg\Requests\Requests::request_multiple( $requests, array( 'timeout' => 20 ) );
+
+		foreach ( $responses as $combo_key => $response ) {
+			if ( ! ( $response instanceof \WpOrg\Requests\Response ) ) {
+				$combos[ $combo_key ]['done'] = true; // same give-up behavior ws_fetch_json already had on a failed request.
+				continue;
+			}
+			$data = json_decode( $response->body, true );
+			if ( ! empty( $data['products'] ) ) {
+				$combos[ $combo_key ]['products'] = array_merge( $combos[ $combo_key ]['products'], $data['products'] );
+			}
+			$pagination = isset( $response->headers['x-pagination'] )
+				? json_decode( $response->headers['x-pagination'], true )
+				: null;
+			if ( ! $pagination || empty( $pagination['hasMore'] ) || ! isset( $pagination['nextOffset'] ) ) {
+				$combos[ $combo_key ]['done'] = true;
+			} else {
+				$combos[ $combo_key ]['offset'] = $pagination['nextOffset'];
+			}
+		}
+	}
+
+	foreach ( $combos as $c ) {
+		ws_write_catalog_rows( $c['state_abbv'], $c['license_type_id'], $c['products'] );
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -685,13 +741,13 @@ const WS_EMPTY_CATALOG_MARKER = '__empty__';
 // A handful of catalog entries in the test API are broken placeholders
 // (name/description/seoName all null or empty) — not a real, clickable
 // course, so they're excluded before ever reaching the table.
-function ws_do_index( $state_abbv, $license_type_id ) {
+function ws_write_catalog_rows( $state_abbv, $license_type_id, $products ) {
 	global $wpdb;
 	$table    = ws_catalog_table();
 	$now      = current_time( 'mysql' );
 	$products = array_values(
 		array_filter(
-			ws_fetch_all_products( $state_abbv, $license_type_id ),
+			$products,
 			function ( $p ) {
 				return ! empty( $p['name'] );
 			}
@@ -749,21 +805,41 @@ function ws_do_index( $state_abbv, $license_type_id ) {
 // lock keeps a second concurrent request for the same combo from
 // redundantly re-fetching the same catalog.
 function ws_ensure_indexed( $state_abbv, $license_type_id ) {
-	$key = "{$state_abbv}_{$license_type_id}";
+	ws_ensure_indexed_pairs( array( array( $state_abbv, $license_type_id ) ) );
+}
 
-	if ( get_transient( "ws_indexed_{$key}" ) ) {
+// Batch form of ws_ensure_indexed() — same per-combo freshness/locking
+// semantics, but every not-yet-cached combo in the batch gets fetched
+// concurrently via ws_fetch_and_index_combos() instead of one at a time.
+function ws_ensure_indexed_pairs( $pairs ) {
+	$todo = array();
+	foreach ( $pairs as $pair ) {
+		list( $state_abbv, $license_type_id ) = $pair;
+		$key = "{$state_abbv}_{$license_type_id}";
+
+		if ( get_transient( "ws_indexed_{$key}" ) ) {
+			continue;
+		}
+		if ( get_transient( "ws_indexing_lock_{$key}" ) ) {
+			sleep( 1 ); // give the in-progress indexing pass a moment to finish.
+			continue;
+		}
+		set_transient( "ws_indexing_lock_{$key}", 1, 30 );
+		$todo[] = $pair;
+	}
+
+	if ( empty( $todo ) ) {
 		return;
 	}
 
-	if ( get_transient( "ws_indexing_lock_{$key}" ) ) {
-		sleep( 1 ); // give the in-progress indexing pass a moment to finish.
-		return;
-	}
+	ws_fetch_and_index_combos( $todo );
 
-	set_transient( "ws_indexing_lock_{$key}", 1, 30 );
-	ws_do_index( $state_abbv, $license_type_id );
-	delete_transient( "ws_indexing_lock_{$key}" );
-	set_transient( "ws_indexed_{$key}", 1, WS_INDEX_TTL );
+	foreach ( $todo as $pair ) {
+		list( $state_abbv, $license_type_id ) = $pair;
+		$key = "{$state_abbv}_{$license_type_id}";
+		delete_transient( "ws_indexing_lock_{$key}" );
+		set_transient( "ws_indexed_{$key}", 1, WS_INDEX_TTL );
+	}
 }
 
 // Reshapes a ws_catalog row back into the product shape the frontend
@@ -820,9 +896,7 @@ function ws_search_handle_warm() {
 	}
 
 	set_time_limit( 60 );
-	foreach ( ws_get_license_type_ids() as $license_type_id ) {
-		ws_ensure_indexed( $state_abbv, $license_type_id );
-	}
+	ws_ensure_indexed_pairs( ws_state_license_pairs( $state_abbv ) );
 	wp_send_json( array( 'warmed' => true ) );
 }
 add_action( 'wp_ajax_ws_search_warm', 'ws_search_handle_warm' );
@@ -847,9 +921,7 @@ function ws_search_handle_search() {
 	}
 
 	set_time_limit( 60 );
-	foreach ( ws_get_license_type_ids() as $license_type_id ) {
-		ws_ensure_indexed( $state_abbv, $license_type_id );
-	}
+	ws_ensure_indexed_pairs( ws_state_license_pairs( $state_abbv ) );
 
 	$query_tokens = ws_tokenize( $q );
 	$table        = ws_catalog_table();

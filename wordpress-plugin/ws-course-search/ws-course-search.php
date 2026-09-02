@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.6
+ * Version:     4.0.7
  * Author:      Siful Siddiki
  */
 
@@ -119,9 +119,9 @@ function ws_search_create_tables() {
 	// What people actually search for — not tracked anywhere today (see
 	// architecture doc §8, "Search analytics"). One row per committed
 	// search (button/Enter/selecting a result), not every keystroke — the
-	// JS side only logs at the same points it saves to "recent searches".
-	// No UI on this yet; it just needs to exist so the data is there when
-	// someone asks for it.
+	// JS side only logs at those same "explicit commit" moments. No UI on
+	// this yet; it just needs to exist so the data is there when someone
+	// asks for it.
 	dbDelta(
 		"CREATE TABLE {$search_log_table} (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -337,7 +337,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.6',
+		'4.0.7',
 		true
 	);
 	wp_localize_script(
@@ -367,20 +367,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.6'
+		'4.0.7'
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.6',
+		'4.0.7',
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.6',
+		'4.0.7',
 		true
 	);
 }
@@ -966,9 +966,9 @@ function ws_search_handle_search() {
 add_action( 'wp_ajax_ws_search', 'ws_search_handle_search' );
 add_action( 'wp_ajax_nopriv_ws_search', 'ws_search_handle_search' );
 
-// Logs a committed search term (see the JS side's saveRecent() — this rides
-// the same "explicit commit, not every keystroke" moments "recent searches"
-// already uses). No auth/nonce, same as the other public search endpoints
+// Logs a committed search term (see the JS side's logSearchTerm() — fired
+// only on "explicit commit" moments, not every keystroke). No auth/nonce,
+// same as the other public search endpoints
 // above; a plain insert, so worst case a malicious caller pollutes the log
 // table, not the catalog itself. query is capped to the column width —
 // silently truncated rather than rejected, since a too-long search phrase

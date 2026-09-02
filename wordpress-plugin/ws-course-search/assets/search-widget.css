@@ -244,65 +244,6 @@
   z-index: 20;
 }
 
-.ws-search__recent {
-  margin-top: 20px;
-}
-
-.ws-search__recent-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.ws-search__recent-header span {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #6b7280;
-}
-
-.ws-search__recent-clear {
-  border: none;
-  background: none;
-  color: #212121;
-  font-size: 13px;
-  text-decoration: underline;
-  cursor: pointer;
-  padding: 0;
-}
-
-.ws-search__recent-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.ws-search__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: 1px solid #e2e5ea;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  color: #212121;
-  cursor: pointer;
-}
-
-.ws-search__pill svg {
-  width: 14px;
-  height: 14px;
-  color: #9aa2b1;
-}
-
-.ws-search__pill:hover {
-  border-color: #2b57b0;
-}
-
 .ws-search__results {
   margin: 20px 0 0;
   padding: 0;

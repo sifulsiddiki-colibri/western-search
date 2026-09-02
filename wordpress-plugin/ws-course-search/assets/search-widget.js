@@ -53,11 +53,10 @@
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STATE_SUGGESTION_LIMIT = 8;
-  const RECENT_KEY = "wsSearchRecent";
-  const MAX_RECENT = 5;
 
-  // Every DOM id the widget generates for itself (the results list, recent
-  // searches, etc.) is derived from this root id — so it has to be unique
+  // Every DOM id the widget generates for itself (the results list, the
+  // state suggestion list, etc.) is derived from this root id — so it has
+  // to be unique
   // whenever there's more than one instance on a page, even if whatever
   // embedded the widget forgot to set one.
   let autoIdCounter = 0;
@@ -151,7 +150,6 @@
   }
 
   const SEARCH_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
-  const CLOCK_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><path d="M10 6v4l3 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   const SPARKLE_ICON = `<svg viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 2l1.2 4.8L16 8l-4.8 1.2L10 14l-1.2-4.8L4 8l4.8-1.2L10 2z"/><path d="M16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6L16 13z"/></svg>`;
   const PIN_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 18s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/></svg>`;
   const CHEVRON_ICON = `<svg viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -175,12 +173,8 @@
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
       this.professionSlug = this.options.defaultProfession || "nursing";
       this.states = []; // populated by loadLookups(); read by the state type-ahead before then is just empty.
-      // Namespaced by container id so two instances on the same page never
-      // share "recent searches," per the multi-instance requirement.
-      this.recentKey = `${RECENT_KEY}:${this.root.id}`;
 
       this.context = this.loadContext();
-      this.recent = this.loadRecent();
 
       this.render();
       if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
@@ -218,32 +212,14 @@
       return { stateAbbv: this.options.defaultState || "" };
     }
 
-    loadRecent() {
-      try {
-        return JSON.parse(localStorage.getItem(this.recentKey) || "[]");
-      } catch (e) {
-        return [];
-      }
-    }
-
-    saveRecent(query) {
-      this.recent = [query, ...this.recent.filter((q) => q !== query)].slice(
-        0,
-        MAX_RECENT
-      );
-      localStorage.setItem(this.recentKey, JSON.stringify(this.recent));
-      this.renderRecent();
-      this.logSearchTerm(query);
-    }
-
-    // Analytics only — every call site of saveRecent() is already an
-    // "explicit commit" (Enter, Search button, picking a result), never a
-    // raw keystroke, so this piggybacks on that instead of needing its own
-    // debounce. Fire-and-forget: a dropped log shouldn't ever block or
-    // visibly affect the search itself. keepalive is required, not
-    // decorative — every call site immediately triggers a same-tick
-    // navigation (goToViewAll() or a result link's default click), which
-    // would otherwise abort a normal in-flight fetch before it reaches the
+    // Analytics only — every call site is already an "explicit commit"
+    // (Enter, Search button, picking a result), never a raw keystroke, so
+    // this piggybacks on that instead of needing its own debounce.
+    // Fire-and-forget: a dropped log shouldn't ever block or visibly
+    // affect the search itself. keepalive is required, not decorative —
+    // every call site immediately triggers a same-tick navigation
+    // (goToViewAll() or a result link's default click), which would
+    // otherwise abort a normal in-flight fetch before it reaches the
     // server.
     logSearchTerm(query) {
       if (!LOG_TERM_ENDPOINT || !query) return;
@@ -257,12 +233,6 @@
         }),
         keepalive: true,
       }).catch(() => {});
-    }
-
-    clearRecent() {
-      this.recent = [];
-      localStorage.removeItem(this.recentKey);
-      this.renderRecent();
     }
 
     render() {
@@ -317,14 +287,6 @@
             </div>
 
             <div class="ws-search__dropdown">
-              <div class="ws-search__recent" hidden>
-                <div class="ws-search__recent-header">
-                  <span>Recent searches</span>
-                  <button type="button" class="ws-search__recent-clear">Clear</button>
-                </div>
-                <div class="ws-search__recent-pills"></div>
-              </div>
-
               <ul class="ws-search__results" id="${resultsId}" hidden></ul>
             </div>
           </div>
@@ -339,16 +301,11 @@
       this.clearBtn = this.root.querySelector(".ws-search__clear");
       this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
-      this.recentEl = this.root.querySelector(".ws-search__recent");
-      this.recentPillsEl = this.root.querySelector(".ws-search__recent-pills");
 
       if (this.stateInput) this.wireStateInput();
 
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
-      this.input.addEventListener("focus", () => {
-        if (!this.input.value.trim()) this.renderRecent();
-      });
       this.clearBtn.addEventListener("click", () => {
         this.input.value = "";
         this.onInput();
@@ -369,8 +326,6 @@
         if (!this.resultsEl.hidden) this.closeResults();
         if (this.stateListEl && !this.stateListEl.hidden) this.closeStateSuggestions();
       });
-
-      this.renderRecent();
     }
 
     // Selecting a state used to be a <select> "change" event — same
@@ -495,34 +450,6 @@
       if (active) active.scrollIntoView({ block: "nearest" });
     }
 
-    renderRecent() {
-      if (!this.recent.length || this.input.value.trim()) {
-        this.recentEl.hidden = true;
-        return;
-      }
-      this.recentPillsEl.innerHTML = this.recent
-        .map(
-          (q) => `
-            <button type="button" class="ws-search__pill" data-query="${escapeHtml(
-              q
-            )}">${CLOCK_ICON}${escapeHtml(q)}</button>
-          `
-        )
-        .join("");
-      this.recentEl.hidden = false;
-
-      this.recentPillsEl.querySelectorAll(".ws-search__pill").forEach((pill) => {
-        pill.addEventListener("click", () => {
-          this.input.value = pill.dataset.query;
-          this.runSearch(false, true);
-        });
-      });
-
-      this.recentEl
-        .querySelector(".ws-search__recent-clear")
-        .onclick = () => this.clearRecent();
-    }
-
     async loadLookups() {
       try {
         const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
@@ -549,7 +476,6 @@
 
       if (!query) {
         this.closeResults();
-        this.renderRecent();
         return;
       }
       if (query.length < MIN_QUERY_LENGTH) {
@@ -573,7 +499,7 @@
       if (!query) return false;
 
       if (this.options.viewAllPageUrl) {
-        this.saveRecent(query);
+        this.logSearchTerm(query);
         const params = new URLSearchParams({ searchPhrase: query });
         if (this.context.stateAbbv) params.set("state", this.context.stateAbbv);
         window.location.href = `${this.options.viewAllPageUrl}?${params.toString()}`;
@@ -581,7 +507,7 @@
       }
 
       if (!WP_CONFIG || !WP_CONFIG.viewAllBase) return false;
-      this.saveRecent(query);
+      this.logSearchTerm(query);
       window.location.href = buildViewAllUrl(
         WP_CONFIG.viewAllBase,
         this.professionSlug,
@@ -606,7 +532,7 @@
       } else if (e.key === "Enter") {
         if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
           e.preventDefault();
-          this.saveRecent(this.input.value.trim());
+          this.logSearchTerm(this.input.value.trim());
           window.location.href = this.buildProductUrl(
             this.lastResults[this.activeIndex],
             this.context.stateAbbv
@@ -628,10 +554,10 @@
     }
 
     // `explicit` distinguishes a deliberate commit (Enter, Search button,
-    // clicking a result/pill) from the automatic debounced search that
-    // runs while the user is still typing — only explicit commits get
-    // saved to "recent searches", otherwise every intermediate keystroke
-    // ("ca", "car", "card", ...) would clutter that list.
+    // clicking a result) from the automatic debounced search that runs
+    // while the user is still typing — only explicit commits get logged,
+    // otherwise every intermediate keystroke ("ca", "car", "card", ...)
+    // would clutter the search-term log.
     async runSearch(expand, explicit) {
       const query = this.input.value.trim();
       if (query.length < MIN_QUERY_LENGTH) {
@@ -645,7 +571,6 @@
       }
 
       this.expanded = !!expand;
-      this.recentEl.hidden = true;
 
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
@@ -667,7 +592,7 @@
         const data = await res.json();
         this.lastResults = data.products || [];
         this.lastTotal = data.total || this.lastResults.length;
-        if (explicit) this.saveRecent(query);
+        if (explicit) this.logSearchTerm(query);
         this.renderResults(query);
 
         // Fire-and-forget: only meaningful when SEMANTIC_ENDPOINT exists
@@ -803,7 +728,7 @@
         });
       }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
-        a.addEventListener("click", () => this.saveRecent(query));
+        a.addEventListener("click", () => this.logSearchTerm(query));
       });
 
       this.resultsEl.hidden = false;
@@ -839,7 +764,6 @@
     showLoading() {
       // Opens the panel the instant a valid query exists, instead of
       // leaving a dead pause while the debounce/network round trip runs.
-      this.recentEl.hidden = true;
       this.resultsEl.innerHTML = `<li class="ws-search__message ws-search__message--loading">Searching…</li>`;
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");

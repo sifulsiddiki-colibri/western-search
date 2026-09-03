@@ -66,7 +66,7 @@ stakeholder ask it closes out. Full reasoning for each is in §1–§4 below.
       save-embeddings logic. `ws-course-search.php` +
       `assets/admin-embeddings.js`. *(Saru, §1 "is there an admin side...
       upload JSON files with existing embeddings")*
-- [ ] **7. Build the Claude Code plugin that generates that JSON.**
+- [x] **7. Build the Claude Code plugin that generates that JSON.**
       `claude-plugins/embeddings-generator/` currently has nothing but a
       stray `node_modules` — needs a real manifest + skill/script using
       `@xenova/transformers` + `Xenova/all-MiniLM-L6-v2` in Node, so its
@@ -90,6 +90,18 @@ stakeholder ask it closes out. Full reasoning for each is in §1–§4 below.
 **Not on this list on purpose:** progressive "exact phrase first, extend
 with synonyms after" search. Saru and Aashima both explicitly deprioritized
 it in the meeting — leave it as a later follow-up, not part of this pass.
+
+**Items 8-9 status (2026-09-03):** left unchecked deliberately — both need a
+real WP page to verify by hand, which isn't available from this repo. Run
+this check against the `western-search-wp-test` harness repo: open a test
+page, type `/`, confirm "WS Course Search" appears in the inserter, then
+drop it twice (or block + `[ws_course_search]` shortcode) on one page and
+confirm the two instances stay independent.
+
+**Item 10 status (2026-09-03):** deliberately not touched in this pass —
+`WS_MARKETING_API_BASE`/`WS_VIEW_ALL_BASE` are still the test hosts. Doc's
+own ordering puts this last, "before any real go-live," not as part of
+implementing items 1-7.
 
 ---
 

@@ -1,0 +1,6 @@
+{
+  "name": "embeddings-generator",
+  "version": "1.0.0",
+  "description": "Generate course-catalog embeddings offline (Node, @xenova/transformers) in the exact JSON schema the ws-course-search WordPress plugin's admin \"Import embeddings\" upload accepts.",
+  "author": "Siful Siddiki"
+}

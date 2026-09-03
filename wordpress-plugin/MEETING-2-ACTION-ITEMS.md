@@ -51,7 +51,7 @@ stakeholder ask it closes out. Full reasoning for each is in §1–§4 below.
       *(Saru, §1 "cache 2-3 letter combos" — refined 2026-09-03 into a
       related-terms expansion table rather than a flat popular-products
       list, and scoped to 3-letter combinations only)*
-- [ ] **4. Replace the pulsing "Searching…" text with a real spinner.**
+- [x] **4. Replace the pulsing "Searching…" text with a real spinner.**
       `assets/search-widget.css` (+ a small markup tweak in
       `search-widget.js`'s `showLoading()`). *(Aashima, §1 "add a wait
       timer/searching indicator")*

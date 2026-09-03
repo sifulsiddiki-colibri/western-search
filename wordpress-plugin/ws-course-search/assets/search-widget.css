@@ -372,12 +372,24 @@
 }
 
 .ws-search__message--loading {
-  animation: ws-pulse 1s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-@keyframes ws-pulse {
-  50% {
-    opacity: 0.5;
+.ws-search__spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #dfe6f3;
+  border-top-color: #2559b7;
+  border-radius: 50%;
+  animation: ws-spin 0.7s linear infinite;
+}
+
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

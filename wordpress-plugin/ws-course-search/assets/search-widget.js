@@ -764,7 +764,7 @@
     showLoading() {
       // Opens the panel the instant a valid query exists, instead of
       // leaving a dead pause while the debounce/network round trip runs.
-      this.resultsEl.innerHTML = `<li class="ws-search__message ws-search__message--loading">Searching…</li>`;
+      this.resultsEl.innerHTML = `<li class="ws-search__message ws-search__message--loading"><span class="ws-search__spinner" aria-hidden="true"></span>Searching…</li>`;
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
     }

@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.7
+ * Version:     4.1.0
  * Author:      Siful Siddiki
  */
 
@@ -35,6 +35,13 @@ const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.
 const WS_INDEX_TTL = 6 * 60 * 60; // seconds
 const WS_RELEVANCE_THRESHOLD       = 0.4; // raw cosine cutoff — see ws_search_handle_semantic().
 const WS_SEMANTIC_MIN_QUERY_LENGTH = 4;   // too little signal for embeddings below this.
+const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS side — no live search below this, even if this endpoint is hit directly.
+
+// Single source of truth for every enqueued asset's cache-busting version —
+// previously hand-repeated as the literal '4.0.7' at each wp_register_*/
+// wp_enqueue_script() call, which is easy to forget to bump and leaves
+// WordPress serving a stale cached JS/CSS file after an edit.
+const WS_SEARCH_VERSION = '4.1.0';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -337,7 +344,7 @@ function ws_search_enqueue_admin_assets( $hook ) {
 		'ws-course-search-admin-embeddings',
 		plugins_url( 'assets/admin-embeddings.js', __FILE__ ),
 		array(),
-		'4.0.7',
+		WS_SEARCH_VERSION,
 		true
 	);
 	wp_localize_script(
@@ -367,20 +374,20 @@ function ws_search_register_assets() {
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
 		array(),
-		'4.0.7'
+		WS_SEARCH_VERSION
 	);
 	wp_register_script(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.js', __FILE__ ),
 		array(),
-		'4.0.7',
+		WS_SEARCH_VERSION,
 		true
 	);
 	wp_register_script(
 		'ws-course-search-block-editor',
 		plugins_url( 'assets/block-editor.js', __FILE__ ),
 		array( 'wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n' ),
-		'4.0.7',
+		WS_SEARCH_VERSION,
 		true
 	);
 }
@@ -911,7 +918,7 @@ function ws_search_handle_search() {
 	if ( ! $state_abbv ) {
 		wp_send_json( array( 'error' => 'state is required' ), 400 );
 	}
-	if ( strlen( $q ) < 2 ) {
+	if ( strlen( $q ) < WS_MIN_QUERY_LENGTH ) {
 		wp_send_json(
 			array(
 				'products' => array(),

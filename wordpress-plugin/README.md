@@ -129,7 +129,7 @@ moved to wherever a browser already is — no new infrastructure at all.
 
 ## How catalog data is stored
 
-Three custom tables (created via `dbDelta` on plugin activation, migrated
+Four custom tables (created via `dbDelta` on plugin activation, migrated
 automatically on upgrade — see `ws_search_maybe_upgrade_db()`):
 
 - **`wp_ws_catalog`** — one row per `(product_id, state_abbv,
@@ -150,6 +150,10 @@ automatically on upgrade — see `ws_search_maybe_upgrade_db()`):
   not every keystroke): `query`, `state_abbv`, `result_count`, `created_at`.
   Western didn't track search terms before this plugin (architecture doc
   §8). No admin UI on top of it yet — the data just needs to exist.
+- **`wp_ws_trigram_terms`** — a 3-letter-prefix → related term/phrase index
+  (`trigram`, `related_term`, `weight`), rebuilt from scratch on the same
+  `WS_INDEX_TTL` cadence as the catalog (see "Related-terms (trigram)
+  index" below). Never written to per-request — only ever read.
 
 Transients were deliberately **not** used for catalog/embedding data itself
 (too large and too frequently re-read for `wp_options` on a host with no
@@ -175,6 +179,37 @@ on-demand path still carries real visitor traffic in the meantime.
 WP-Cron only actually fires on site traffic (WordPress's own pseudo-cron) —
 for a low-traffic site, consider a real system cron hitting `wp-cron.php`
 periodically instead of relying on visits alone.
+
+## Related-terms (trigram) index
+
+A 3-letter search floor (`MIN_QUERY_LENGTH`) means the very first search a
+visitor sees is often just 3 characters — not enough for the existing
+keyword search to surface much beyond a literal prefix. Rather than compute
+a synonym/semantic expansion live (the actually expensive part), a
+`ws_search_trigram_rebuild_sweep`/`_batch` WP-Cron job (same self-chaining,
+bounded-batch shape as the pre-warm sweep above, `WS_TRIGRAM_BATCH_SIZE` per
+tick) rebuilds `wp_ws_trigram_terms` offline:
+
+- For every product with a saved embedding, it finds that product's top
+  `WS_TRIGRAM_NEIGHBOR_LIMIT` nearest-neighbor *products* by reusing
+  `ws_cosine_similarity()` — product-to-product, against vectors already in
+  `wp_ws_embeddings` — instead of the query-to-product comparison
+  `ws_search_handle_semantic()` does live. WP-Cron is PHP-only and has no
+  access to the browser/Node embedding model, so this can never compute a
+  *new* embedding; it only ever reuses ones some browser already saved.
+- The product's own name/tags and its neighbors' name/tags become
+  `related_term` entries, indexed under **both** sides' 3-letter prefixes —
+  so typing either a term's own prefix or a semantic neighbor's prefix
+  surfaces the other.
+- At query time (`ws_search_query_data()`, only for a single-token query
+  ≥ `WS_MIN_QUERY_LENGTH`), the typed prefix is looked up
+  (`ws_get_related_terms()`) and the resulting related terms widen
+  `ws_product_matches_query()`'s acceptance for that one token — OR
+  semantics across the expansion candidates, never changing the existing
+  AND-across-tokens behavior for a real multi-word phrase.
+- Full rebuild each sweep (`TRUNCATE` then repopulate), not incremental —
+  it's a pure derived index, so this is the simplest way to avoid stale
+  entries from removed/changed products.
 
 ## Semantic search: embeddings computed in the browser
 
@@ -215,8 +250,8 @@ fast keyword/typo matching only with no extra download for visitors.
    `ws-course-search.zip` (WP Admin only — also how to push an updated zip
    to replace an already-installed version, no file access needed).
 2. Activate it from the WordPress admin (Plugins → Installed Plugins). This
-   creates the `ws_catalog`/`ws_embeddings`/`ws_search_log` tables and
-   schedules the background pre-warm sweep.
+   creates the `ws_catalog`/`ws_embeddings`/`ws_search_log`/`ws_trigram_terms`
+   tables and schedules the background pre-warm and trigram-rebuild sweeps.
 3. Add `[ws_course_search]` to the homepage and product listing page
    templates, or insert the **WS Course Search** block directly in the
    block editor — both render the same widget. Leave `default_state` unset

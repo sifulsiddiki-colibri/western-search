@@ -69,6 +69,11 @@ function ws_search_log_table() {
 	return $wpdb->prefix . 'ws_search_log';
 }
 
+function ws_trigram_terms_table() {
+	global $wpdb;
+	return $wpdb->prefix . 'ws_trigram_terms';
+}
+
 // One row per (product_id, state_abbv, license_type_id) — a product can
 // legitimately repeat across state/license combos with different
 // pricing/approval, so the composite key matters (same reasoning the old
@@ -88,6 +93,7 @@ function ws_search_create_tables() {
 	$catalog_table    = ws_catalog_table();
 	$embeddings_table = ws_embeddings_table();
 	$search_log_table = ws_search_log_table();
+	$trigram_table    = ws_trigram_terms_table();
 
 	dbDelta(
 		"CREATE TABLE {$catalog_table} (
@@ -140,6 +146,23 @@ function ws_search_create_tables() {
 			KEY created_at (created_at)
 		) {$charset_collate};"
 	);
+
+	// A 3-letter prefix -> related term/phrase index, derived entirely from
+	// wp_ws_embeddings (see the "Related-terms (trigram) index" section
+	// below) — broadens a short first search beyond a literal prefix match
+	// without computing anything per-request. weight is a raw cosine score
+	// (see ws_cosine_similarity()); GREATEST(weight, ...) on upsert keeps
+	// the strongest association when more than one neighbor produces the
+	// same (trigram, related_term) pair.
+	dbDelta(
+		"CREATE TABLE {$trigram_table} (
+			trigram VARCHAR(3) NOT NULL,
+			related_term VARCHAR(191) NOT NULL,
+			weight FLOAT NOT NULL,
+			PRIMARY KEY  (trigram, related_term),
+			KEY trigram (trigram)
+		) {$charset_collate};"
+	);
 }
 
 function ws_search_activate() {
@@ -154,7 +177,7 @@ register_activation_hook( __FILE__, 'ws_search_activate' );
 // — this just means a schema change (e.g. the tags_raw column, added
 // after the initial release) reaches sites that installed before that
 // change, without requiring a manual deactivate/reactivate.
-const WS_SEARCH_DB_VERSION = '3'; // '3' adds wp_ws_search_log.
+const WS_SEARCH_DB_VERSION = '4'; // '3' adds wp_ws_search_log; '4' adds wp_ws_trigram_terms.
 function ws_search_maybe_upgrade_db() {
 	if ( get_option( 'ws_search_db_version' ) === WS_SEARCH_DB_VERSION ) {
 		return;
@@ -167,6 +190,8 @@ add_action( 'plugins_loaded', 'ws_search_maybe_upgrade_db' );
 function ws_search_deactivate() {
 	wp_clear_scheduled_hook( 'ws_search_prewarm_sweep' );
 	wp_clear_scheduled_hook( 'ws_search_prewarm_batch' );
+	wp_clear_scheduled_hook( 'ws_search_trigram_rebuild_sweep' );
+	wp_clear_scheduled_hook( 'ws_search_trigram_rebuild_batch' );
 }
 register_deactivation_hook( __FILE__, 'ws_search_deactivate' );
 
@@ -207,6 +232,12 @@ add_filter( 'cron_schedules', 'ws_search_register_cron_schedule' ); // phpcs:ign
 function ws_search_ensure_cron_scheduled() {
 	if ( ! wp_next_scheduled( 'ws_search_prewarm_sweep' ) ) {
 		wp_schedule_event( time(), 'ws_index_ttl', 'ws_search_prewarm_sweep' );
+	}
+	// Same cadence as the catalog TTL — the trigram index is derived from
+	// embeddings, which are themselves derived from the catalog, so it
+	// never needs to refresh more often than its own inputs do.
+	if ( ! wp_next_scheduled( 'ws_search_trigram_rebuild_sweep' ) ) {
+		wp_schedule_event( time(), 'ws_index_ttl', 'ws_search_trigram_rebuild_sweep' );
 	}
 }
 add_action( 'init', 'ws_search_ensure_cron_scheduled' );
@@ -268,6 +299,231 @@ function ws_search_run_prewarm_batch() {
 	}
 }
 add_action( 'ws_search_prewarm_batch', 'ws_search_run_prewarm_batch' );
+
+// ---------------------------------------------------------------------------
+// Related-terms (trigram) index. Broadens a short (3-letter-floor) first
+// search beyond a literal prefix match, without computing anything
+// per-request — the expensive part was always computing an expansion, not
+// querying the already-local catalog. Populated entirely offline via
+// WP-Cron, self-chaining in bounded batches exactly like the prewarm sweep
+// above.
+//
+// Derivation reuses ws_cosine_similarity() product-to-product (nearest
+// neighbor *products*, using vectors already sitting in wp_ws_embeddings)
+// instead of query-to-product like ws_search_handle_semantic() does.
+// WP-Cron is PHP-only and has no access to the browser/Node embedding
+// model, so it can never compute a *new* embedding for a vocabulary term —
+// only ever reuses vectors some browser already saved. That also means
+// this index is only as fresh as the embeddings it's derived from; it
+// runs on the same WS_INDEX_TTL cadence as a result.
+// ---------------------------------------------------------------------------
+
+const WS_TRIGRAM_BATCH_SIZE     = 50; // products per cron tick — pure local computation over already-cached data, not network-bound like the prewarm sweep, so a larger batch is safe.
+const WS_TRIGRAM_NEIGHBOR_LIMIT = 5;  // top-K nearest neighbor products considered per product.
+const WS_TRIGRAM_MAX_TAGS       = 5;  // tag values considered per product, to bound row growth.
+const WS_TRIGRAM_RELATED_LIMIT  = 10; // related terms fetched per query-time lookup.
+
+// Fires every WS_INDEX_TTL. Full rebuild each sweep, not incremental — this
+// table is a pure derived index, so starting clean is the simplest way to
+// avoid stale entries left behind by removed/changed products.
+function ws_search_start_trigram_rebuild_sweep() {
+	global $wpdb;
+	$wpdb->query( 'TRUNCATE TABLE ' . ws_trigram_terms_table() ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	update_option( 'ws_trigram_rebuild_cursor', 0, false );
+	update_option( 'ws_trigram_rebuild_progress', 0, false );
+	ws_search_run_trigram_rebuild_batch();
+}
+add_action( 'ws_search_trigram_rebuild_sweep', 'ws_search_start_trigram_rebuild_sweep' );
+
+// Lowercased first 3 characters — only ever called on terms already
+// filtered to strlen >= 3 (see ws_trigram_terms_for_product()).
+function ws_trigram_prefix( $term ) {
+	return strtolower( substr( $term, 0, 3 ) );
+}
+
+// A product's own name plus up to WS_TRIGRAM_MAX_TAGS of its tag values —
+// phrases, not single stemmed tokens (the meeting notes call these "a word/
+// phrase"), deduped case-insensitively and floored at 3 characters so every
+// term has a real trigram prefix.
+function ws_trigram_terms_for_product( $name, $tags_raw ) {
+	$candidates = array( $name );
+	if ( $tags_raw ) {
+		$candidates = array_merge(
+			$candidates,
+			array_slice( array_map( 'trim', explode( ',', $tags_raw ) ), 0, WS_TRIGRAM_MAX_TAGS )
+		);
+	}
+
+	$seen  = array();
+	$terms = array();
+	foreach ( $candidates as $candidate ) {
+		$candidate = trim( (string) $candidate );
+		if ( strlen( $candidate ) < 3 ) {
+			continue;
+		}
+		$key = strtolower( $candidate );
+		if ( isset( $seen[ $key ] ) ) {
+			continue;
+		}
+		$seen[ $key ] = true;
+		$terms[]      = $candidate;
+	}
+	return $terms;
+}
+
+// Keeps the strongest weight seen so far for a given (trigram, related_term)
+// pair across this batch, before it's flushed to the DB in one insert.
+function ws_trigram_accumulate( &$pairs, $trigram, $related_term, $weight ) {
+	$key = $trigram . "\t" . $related_term;
+	if ( ! isset( $pairs[ $key ] ) || $weight > $pairs[ $key ]['weight'] ) {
+		$pairs[ $key ] = array(
+			'trigram'      => $trigram,
+			'related_term' => $related_term,
+			'weight'       => $weight,
+		);
+	}
+}
+
+// One bulk upsert per batch rather than one query per pair — GREATEST()
+// keeps the strongest association if a later sweep (or another pair within
+// this same batch) produces the same (trigram, related_term) again.
+function ws_trigram_save_pairs( array $pairs ) {
+	if ( empty( $pairs ) ) {
+		return;
+	}
+	global $wpdb;
+	$table = ws_trigram_terms_table();
+
+	$placeholders = array();
+	$values       = array();
+	foreach ( $pairs as $pair ) {
+		$placeholders[] = '(%s, %s, %f)';
+		$values[]       = $pair['trigram'];
+		$values[]       = $pair['related_term'];
+		$values[]       = $pair['weight'];
+	}
+
+	$sql = "INSERT INTO {$table} (trigram, related_term, weight) VALUES " . implode( ', ', $placeholders )
+		. ' ON DUPLICATE KEY UPDATE weight = GREATEST(weight, VALUES(weight))';
+	$wpdb->query( $wpdb->prepare( $sql, $values ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+}
+
+// Processes one bounded batch of source products, then self-chains a single
+// event a minute out to continue — same shape as ws_search_run_prewarm_batch().
+function ws_search_run_trigram_rebuild_batch() {
+	global $wpdb;
+	$embeddings_table = ws_embeddings_table();
+	$catalog_table    = ws_catalog_table();
+
+	$vector_rows = $wpdb->get_results( "SELECT product_id, vector FROM {$embeddings_table} ORDER BY product_id", ARRAY_A );
+	$total       = count( $vector_rows );
+	if ( 0 === $total ) {
+		return;
+	}
+
+	$vectors = array();
+	foreach ( $vector_rows as $row ) {
+		$vectors[ $row['product_id'] ] = array_values( unpack( 'f*', base64_decode( $row['vector'] ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+	}
+	$product_ids = array_keys( $vectors );
+
+	// Same GROUP BY MAX() pattern as ws_search_handle_embeddings_needed() —
+	// name/tags don't vary by state/license, so any row for a product_id
+	// gives the same content.
+	$meta_rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT product_id, MAX(name) AS name, MAX(tags_raw) AS tags_raw
+			 FROM {$catalog_table}
+			 WHERE product_id != %s
+			 GROUP BY product_id",
+			WS_EMPTY_CATALOG_MARKER
+		),
+		ARRAY_A
+	);
+	$meta = array();
+	foreach ( $meta_rows as $row ) {
+		$meta[ $row['product_id'] ] = $row;
+	}
+
+	$cursor   = (int) get_option( 'ws_trigram_rebuild_cursor', 0 );
+	$progress = (int) get_option( 'ws_trigram_rebuild_progress', 0 );
+	set_time_limit( 55 );
+
+	$batch_size = min( WS_TRIGRAM_BATCH_SIZE, $total );
+	$pairs      = array();
+	for ( $i = 0; $i < $batch_size; $i++ ) {
+		$product_id = $product_ids[ ( $cursor + $i ) % $total ];
+		if ( ! isset( $meta[ $product_id ] ) ) {
+			continue;
+		}
+		$terms = ws_trigram_terms_for_product( $meta[ $product_id ]['name'], $meta[ $product_id ]['tags_raw'] );
+		if ( empty( $terms ) ) {
+			continue;
+		}
+
+		$scored = array();
+		foreach ( $vectors as $other_id => $other_vector ) {
+			if ( $other_id === $product_id || ! isset( $meta[ $other_id ] ) ) {
+				continue;
+			}
+			$score = ws_cosine_similarity( $vectors[ $product_id ], $other_vector );
+			if ( $score >= WS_RELEVANCE_THRESHOLD ) {
+				$scored[] = array(
+					'id'    => $other_id,
+					'score' => $score,
+				);
+			}
+		}
+		usort(
+			$scored,
+			function ( $a, $b ) {
+				return $b['score'] <=> $a['score'];
+			}
+		);
+		$neighbors = array_slice( $scored, 0, WS_TRIGRAM_NEIGHBOR_LIMIT );
+
+		foreach ( $neighbors as $neighbor ) {
+			$neighbor_terms = ws_trigram_terms_for_product( $meta[ $neighbor['id'] ]['name'], $meta[ $neighbor['id'] ]['tags_raw'] );
+			foreach ( $terms as $t ) {
+				foreach ( $neighbor_terms as $n ) {
+					if ( strtolower( $t ) === strtolower( $n ) ) {
+						continue;
+					}
+					// Indexed under prefixes of both the term and its
+					// neighbor, so typing either side's prefix surfaces
+					// the other.
+					ws_trigram_accumulate( $pairs, ws_trigram_prefix( $t ), $n, $neighbor['score'] );
+					ws_trigram_accumulate( $pairs, ws_trigram_prefix( $n ), $t, $neighbor['score'] );
+				}
+			}
+		}
+	}
+
+	ws_trigram_save_pairs( $pairs );
+
+	$progress += $batch_size;
+	update_option( 'ws_trigram_rebuild_cursor', ( $cursor + $batch_size ) % $total, false );
+	update_option( 'ws_trigram_rebuild_progress', $progress, false );
+
+	if ( $progress < $total && ! wp_next_scheduled( 'ws_search_trigram_rebuild_batch' ) ) {
+		wp_schedule_single_event( time() + 60, 'ws_search_trigram_rebuild_batch' );
+	}
+}
+add_action( 'ws_search_trigram_rebuild_batch', 'ws_search_run_trigram_rebuild_batch' );
+
+// Query-time lookup — the whole point of building the index offline is that
+// this is a single indexed SELECT, not a live embedding computation.
+function ws_get_related_terms( $trigram, $limit = WS_TRIGRAM_RELATED_LIMIT ) {
+	global $wpdb;
+	$table = ws_trigram_terms_table();
+	return $wpdb->get_col(
+		$wpdb->prepare(
+			"SELECT related_term FROM {$table} WHERE trigram = %s ORDER BY weight DESC LIMIT %d",
+			$trigram,
+			$limit
+		)
+	);
+}
 
 // ---------------------------------------------------------------------------
 // Settings page (Settings -> WS Course Search)
@@ -705,34 +961,49 @@ function ws_allowed_typos( $len ) {
 	return 2;
 }
 
-function ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens ) {
-	foreach ( $query_tokens as $qt ) {
-		$in_title = false;
-		foreach ( $title_tokens as $t ) {
-			// strpos( $t, $qt ) only — NOT the reverse direction. The
-			// reverse means any short common word (e.g. "a") is trivially
-			// a substring of almost any query, matching nearly everything.
-			if ( false !== strpos( $t, $qt ) ) {
-				$in_title = true;
-				break;
-			}
-			$max_dist = ws_allowed_typos( strlen( $qt ) );
-			if ( $max_dist > 0 && levenshtein( $qt, $t ) <= $max_dist ) {
-				$in_title = true;
-				break;
-			}
+// Factored out of ws_product_matches_query() so the same single-token match
+// rule (typo-tolerant title match, literal description match) can also be
+// applied to related-terms expansion candidates below.
+function ws_token_matches_product( $qt, $title_tokens, $description_tokens ) {
+	foreach ( $title_tokens as $t ) {
+		// strpos( $t, $qt ) only — NOT the reverse direction. The
+		// reverse means any short common word (e.g. "a") is trivially
+		// a substring of almost any query, matching nearly everything.
+		if ( false !== strpos( $t, $qt ) ) {
+			return true;
 		}
-		if ( $in_title ) {
+		$max_dist = ws_allowed_typos( strlen( $qt ) );
+		if ( $max_dist > 0 && levenshtein( $qt, $t ) <= $max_dist ) {
+			return true;
+		}
+	}
+	foreach ( $description_tokens as $t ) {
+		if ( false !== strpos( $t, $qt ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// $expansion_tokens (from wp_ws_trigram_terms, see ws_get_related_terms())
+// widens a single short query token to also accept any semantically-linked
+// term — OR semantics across expansion candidates, since they're alternates
+// for that one token, not additional requirements. ws_search_handle_search()
+// only ever populates $expansion_tokens for a single-token query, so a real
+// multi-word phrase's existing AND-across-tokens behavior is untouched.
+function ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens, $expansion_tokens = array() ) {
+	foreach ( $query_tokens as $qt ) {
+		if ( ws_token_matches_product( $qt, $title_tokens, $description_tokens ) ) {
 			continue;
 		}
-		$in_description = false;
-		foreach ( $description_tokens as $t ) {
-			if ( false !== strpos( $t, $qt ) ) {
-				$in_description = true;
+		$expanded_match = false;
+		foreach ( $expansion_tokens as $et ) {
+			if ( ws_token_matches_product( $et, $title_tokens, $description_tokens ) ) {
+				$expanded_match = true;
 				break;
 			}
 		}
-		if ( ! $in_description ) {
+		if ( ! $expanded_match ) {
 			return false;
 		}
 	}
@@ -932,7 +1203,19 @@ function ws_search_handle_search() {
 
 	$query_tokens = ws_tokenize( $q );
 	$table        = ws_catalog_table();
-	$rows         = $wpdb->get_results(
+
+	// Only a single short token (the common "first few letters" case) gets
+	// broadened via the trigram index — a real multi-word phrase already
+	// has enough of its own signal and keeps the existing AND-across-tokens
+	// behavior untouched.
+	$expansion_tokens = array();
+	if ( 1 === count( $query_tokens ) && strlen( $query_tokens[0] ) >= WS_MIN_QUERY_LENGTH ) {
+		foreach ( ws_get_related_terms( ws_trigram_prefix( $query_tokens[0] ) ) as $related_term ) {
+			$expansion_tokens = array_merge( $expansion_tokens, ws_tokenize( $related_term ) );
+		}
+	}
+
+	$rows = $wpdb->get_results(
 		$wpdb->prepare(
 			"SELECT * FROM {$table} WHERE state_abbv = %s AND product_id != %s",
 			$state_abbv,
@@ -949,7 +1232,7 @@ function ws_search_handle_search() {
 		}
 		$title_tokens       = $row['title_tokens'] ? explode( ' ', $row['title_tokens'] ) : array();
 		$description_tokens = $row['description_tokens'] ? explode( ' ', $row['description_tokens'] ) : array();
-		if ( ! ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens ) ) {
+		if ( ! ws_product_matches_query( $title_tokens, $description_tokens, $query_tokens, $expansion_tokens ) ) {
 			continue;
 		}
 		$seen[ $row['product_id'] ] = true;

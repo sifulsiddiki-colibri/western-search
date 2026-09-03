@@ -24,7 +24,7 @@ stakeholder ask it closes out. Full reasoning for each is in §1–§4 below.
       characters at all; 3+ is where real search (backed by item 3) kicks
       in. *(Saru, §1 — refined per Siful 2026-09-03: start search at 3
       letters, not 2)*
-- [ ] **3. Build the 3-letter related-terms database.** A new table keyed
+- [x] **3. Build the 3-letter related-terms database.** A new table keyed
       by 3-letter combination (trigram) → related search terms, used to
       speed up and broaden the very first search instead of computing
       synonym/semantic expansion live. Design:

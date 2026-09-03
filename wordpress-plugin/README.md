@@ -236,6 +236,16 @@ external CDN call) runs the same `Xenova/all-MiniLM-L6-v2` model used by
 - Vectors are stored base64-encoded, not raw binary — `$wpdb`'s
   charset-aware escaping can mangle arbitrary bytes on a real MySQL
   connection, while a base64 string is plain ASCII and immune to that.
+- **Import**: Settings → WS Course Search also has an "Import embeddings"
+  file upload (`ws_search_import_embeddings`, `manage_options` + nonce
+  gated) for a precomputed embeddings JSON file — e.g. generated offline by
+  `claude-plugins/embeddings-generator/`, or exported from another site
+  running this plugin — instead of recomputing everything in the admin's
+  own browser. Locked schema (shared by the button above, this upload, and
+  the Claude plugin's output): `{ productId: string, vector: number[384],
+  sourceHash: string }[]`. Both paths upsert through the same
+  `ws_upsert_embeddings()` function, so a file from either source lands
+  identically.
 
 This is a real, deliberate trade, not a free win: the self-hosted
 model/runtime assets are a genuine ~30MB one-time (then browser-cached)
@@ -250,8 +260,8 @@ fast keyword/typo matching only with no extra download for visitors.
    `ws-course-search.zip` (WP Admin only — also how to push an updated zip
    to replace an already-installed version, no file access needed).
 2. Activate it from the WordPress admin (Plugins → Installed Plugins). This
-   creates the `ws_catalog`/`ws_embeddings`/`ws_search_log` tables and
-   schedules the background pre-warm sweep.
+   creates the `ws_catalog`/`ws_embeddings`/`ws_search_log`/`ws_trigram_terms`
+   tables and schedules the background pre-warm and trigram-rebuild sweeps.
 3. Add `[ws_course_search]` to the homepage and product listing page
    templates, or insert the **WS Course Search** block directly in the
    block editor — both render the same widget. Leave `default_state` unset

@@ -1,9 +1,12 @@
 /**
- * Drives the "Refresh search embeddings" button on Settings -> WS Course
- * Search. Runs entirely in the admin's own browser: fetches which courses
- * need a (re-)computed embedding, computes them via embeddings.js, and
- * POSTs results back in batches so a closed tab only loses unsaved
- * progress, not the whole run.
+ * Drives both embeddings controls on Settings -> WS Course Search:
+ * - "Refresh search embeddings": runs entirely in the admin's own browser —
+ *   fetches which courses need a (re-)computed embedding, computes them via
+ *   embeddings.js, and POSTs results back in batches so a closed tab only
+ *   loses unsaved progress, not the whole run.
+ * - "Import embeddings": uploads a JSON file (e.g. from the
+ *   embeddings-generator Claude plugin) straight to the server, which
+ *   upserts it via the same logic the button above uses.
  */
 (function () {
   const config = window.wsEmbeddingsConfig;
@@ -76,6 +79,40 @@
     } finally {
       running = false;
       btn.disabled = false;
+    }
+  });
+
+  const importForm = document.getElementById("ws-import-embeddings-form");
+  const importStatus = document.getElementById("ws-import-embeddings-status");
+  if (!importForm || !importStatus) return;
+
+  importForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const submitBtn = importForm.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    importStatus.textContent = "Uploading…";
+
+    try {
+      // Picks up the file input and the wp_nonce_field()'d hidden fields
+      // straight from the form — no separate localized nonce needed.
+      const formData = new FormData(importForm);
+      const res = await fetch(
+        `${config.ajaxUrl}?action=ws_search_import_embeddings`,
+        { method: "POST", body: formData }
+      ).then((r) => r.json());
+
+      if (res.error) {
+        importStatus.textContent = `Import failed: ${res.error}`;
+      } else {
+        importStatus.textContent = `Imported ${res.saved}/${res.total} embeddings${
+          res.skipped ? ` (${res.skipped} skipped — malformed rows)` : ""
+        }.`;
+      }
+    } catch (err) {
+      console.error("WS embeddings import failed:", err);
+      importStatus.textContent = "Something went wrong — check the browser console.";
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 })();

@@ -55,11 +55,11 @@ stakeholder ask it closes out. Full reasoning for each is in §1–§4 below.
       `assets/search-widget.css` (+ a small markup tweak in
       `search-widget.js`'s `showLoading()`). *(Aashima, §1 "add a wait
       timer/searching indicator")*
-- [ ] **5. Lock the embeddings JSON schema** — `{productId, vector[384],
+- [x] **5. Lock the embeddings JSON schema** — `{productId, vector[384],
       sourceHash}[]`, matching what `ws_search_handle_save_embeddings()`
       already accepts. This is a 5-minute decision, but items 6 and 7 both
       depend on it, so do it before either.
-- [ ] **6. Build the admin "Import embeddings" UI.** New section on
+- [x] **6. Build the admin "Import embeddings" UI.** New section on
       Settings → WS Course Search: file upload field + a new
       `manage_options`/nonce-gated AJAX endpoint that reads the uploaded
       JSON and upserts into `wp_ws_embeddings`, reusing the existing

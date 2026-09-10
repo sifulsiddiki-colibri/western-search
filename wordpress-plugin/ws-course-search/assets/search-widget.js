@@ -25,15 +25,14 @@
   // the browser can never call it directly — something same-origin always
   // sits in between.
   const WP_CONFIG = typeof wsSearchConfig !== "undefined" ? wsSearchConfig : null;
-  const SEARCH_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search`
-    : "/api/search";
-  const LOOKUPS_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_lookups`
-    : "/api/lookups";
-  const WARM_ENDPOINT = WP_CONFIG
-    ? `${WP_CONFIG.ajaxUrl}?action=ws_search_warm`
-    : "/api/warm";
+  // Under WordPress this calls the plugin's real REST API
+  // (ws-course-search/v1/*, registered in ws_search_register_rest_routes())
+  // per the architecture doc's "WordPress REST endpoint" component — not
+  // admin-ajax.php, which is what these called before and what the ajax
+  // actions of the same name still exist for backward compatibility.
+  const SEARCH_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}search` : "/api/search";
+  const LOOKUPS_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}lookups` : "/api/lookups";
+  const WARM_ENDPOINT = WP_CONFIG ? `${WP_CONFIG.restUrl}warm` : "/api/warm";
   // Only meaningful under WordPress (WP_CONFIG) — server.js has no
   // equivalent endpoint since it already returns semantic matches in the
   // main /api/search response.

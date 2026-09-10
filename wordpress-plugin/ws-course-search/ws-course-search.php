@@ -16,14 +16,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
-	define( 'WS_MARKETING_API_BASE', 'https://test-api-ms.westernschools.com' );
+	define( 'WS_MARKETING_API_BASE', 'https://dev-api-ms.westernschools.com' );
 }
 
 // The "view all results" page lives on the main site, not the Marketing API —
 // clicking Search/Enter/"see all" sends the visitor there instead of expanding
 // the dropdown further. Test host until this is confirmed on production.
 if ( ! defined( 'WS_VIEW_ALL_BASE' ) ) {
-	define( 'WS_VIEW_ALL_BASE', 'https://test.westernschools.com' );
+	define( 'WS_VIEW_ALL_BASE', 'https://dev.westernschools.com' );
 }
 
 const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.

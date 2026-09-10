@@ -46,8 +46,8 @@
     ? `${WP_CONFIG.ajaxUrl}?action=ws_search_log_term`
     : null;
 
-  const DEBOUNCE_MS = 150;
-  const MIN_QUERY_LENGTH = 2;
+  const DEBOUNCE_MS = 500;
+  const MIN_QUERY_LENGTH = 3;
   const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;

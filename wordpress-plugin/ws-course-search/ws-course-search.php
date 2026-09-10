@@ -333,6 +333,72 @@ const WS_TRIGRAM_RELATED_LIMIT  = 10; // related terms fetched per query-time lo
 // for a subsidiary with a very different catalog size than this one's.
 const WS_TRIGRAM_MAX_TERM_SHARE = 0.05;
 
+// Common English function words — strips connector words out of a related
+// term's tokenized words before they're used as query-time match triggers
+// (see ws_search_query_data()'s $expansion_tokens filtering). Fixed, not
+// derived from the catalog like WS_TRIGRAM_MAX_TERM_SHARE above: these are
+// generic to English itself, not to any one subsidiary's own vocabulary.
+const WS_TRIGRAM_STOPWORDS = array(
+	'a',
+	'an',
+	'the',
+	'and',
+	'or',
+	'nor',
+	'but',
+	'of',
+	'to',
+	'in',
+	'on',
+	'at',
+	'for',
+	'with',
+	'is',
+	'are',
+	'was',
+	'were',
+	'be',
+	'been',
+	'being',
+	'it',
+	'its',
+	'this',
+	'that',
+	'these',
+	'those',
+	'as',
+	'by',
+	'from',
+	'into',
+	'your',
+	'you',
+	'their',
+	'they',
+	'our',
+	'we',
+	'not',
+	'no',
+	'do',
+	'does',
+	'did',
+	'can',
+	'will',
+	'would',
+	'should',
+	'may',
+	'might',
+	'must',
+	'about',
+	'after',
+	'before',
+	'over',
+	'under',
+	'than',
+	'then',
+	'so',
+	'if',
+);
+
 // Fires every WS_INDEX_TTL. Full rebuild each sweep, not incremental — this
 // table is a pure derived index, so starting clean is the simplest way to
 // avoid stale entries left behind by removed/changed products.
@@ -397,10 +463,35 @@ function ws_trigram_build_document_frequency( $meta ) {
 	return $doc_frequency;
 }
 
+// Word-level document frequency across one state's already-loaded catalog
+// rows — the query-time counterpart to ws_trigram_build_document_frequency()
+// above, which measures whole tag/name phrases at index-build time instead.
+// Catches domain-common words a fixed stopword list can't know about (e.g.
+// "nursing" in a nursing CE catalog) using the exact fields expansion
+// tokens get matched against (see ws_search_query_data()).
+function ws_trigram_build_row_token_frequency( $rows ) {
+	$doc_frequency = array();
+	foreach ( $rows as $row ) {
+		$tokens = array_unique(
+			array_merge(
+				$row['title_tokens'] ? explode( ' ', $row['title_tokens'] ) : array(),
+				$row['description_tokens'] ? explode( ' ', $row['description_tokens'] ) : array()
+			)
+		);
+		foreach ( $tokens as $token ) {
+			$doc_frequency[ $token ] = ( isset( $doc_frequency[ $token ] ) ? $doc_frequency[ $token ] : 0 ) + 1;
+		}
+	}
+	return $doc_frequency;
+}
+
 // Drops any candidate term used by more than WS_TRIGRAM_MAX_TERM_SHARE of
 // the catalog — applied to a product's own terms and to each neighbor's
 // terms alike, since a generic term shouldn't generate expansions from its
 // own prefix any more than it should be suggested as an expansion target.
+// Also reused at query time (see ws_search_query_data()) against a word-
+// level frequency map instead of a phrase-level one — the "is this
+// candidate too common to be distinguishing" logic is identical either way.
 function ws_trigram_filter_generic_terms( $terms, $doc_frequency, $total_products ) {
 	if ( 0 === $total_products ) {
 		return $terms;
@@ -1318,6 +1409,15 @@ function ws_search_query_data( $state_abbv, $q, $limit = 8 ) {
 	$query_tokens = ws_tokenize( $q );
 	$table        = ws_catalog_table();
 
+	$rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT * FROM {$table} WHERE state_abbv = %s AND product_id != %s",
+			$state_abbv,
+			WS_EMPTY_CATALOG_MARKER
+		),
+		ARRAY_A
+	);
+
 	// Only a single short token (the common "first few letters" case) gets
 	// broadened via the trigram index — a real multi-word phrase already
 	// has enough of its own signal and keeps the existing AND-across-tokens
@@ -1327,16 +1427,35 @@ function ws_search_query_data( $state_abbv, $q, $limit = 8 ) {
 		foreach ( ws_get_related_terms( ws_trigram_prefix( $query_tokens[0] ) ) as $related_term ) {
 			$expansion_tokens = array_merge( $expansion_tokens, ws_tokenize( $related_term ) );
 		}
+		// A related term is a full phrase (a course title, a tag, ...), and
+		// tokenizing it exposes short connector words ("the", "of", "at",
+		// "and") that carry no distinguishing signal on their own — unlike a
+		// real query token, which a person actually chose to type, one of
+		// these as a bare substring match matches a huge fraction of any
+		// real catalog (measured directly: this alone was why "sup"/
+		// "cardiac" queries were matching 370+/374 courses in one state).
+		// Two passes: a fixed English stopword list catches "and"/"the"/
+		// "for" (a plain length floor doesn't — they're all 3+ characters),
+		// then the same generic-term document-frequency filter used at
+		// index-build time (ws_trigram_filter_generic_terms) catches words
+		// that are common within *this state's own catalog* specifically
+		// (e.g. "nursing" or "management" in a nursing CE catalog) rather
+		// than generic to English — a fixed list can't know those, but this
+		// state's own $rows, already loaded below, directly measures it.
+		$expansion_tokens = array_values(
+			array_filter(
+				$expansion_tokens,
+				function ( $token ) {
+					return strlen( $token ) >= WS_MIN_QUERY_LENGTH && ! in_array( $token, WS_TRIGRAM_STOPWORDS, true );
+				}
+			)
+		);
+		$expansion_tokens = ws_trigram_filter_generic_terms(
+			$expansion_tokens,
+			ws_trigram_build_row_token_frequency( $rows ),
+			count( $rows )
+		);
 	}
-
-	$rows = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT * FROM {$table} WHERE state_abbv = %s AND product_id != %s",
-			$state_abbv,
-			WS_EMPTY_CATALOG_MARKER
-		),
-		ARRAY_A
-	);
 
 	$seen     = array();
 	$products = array();

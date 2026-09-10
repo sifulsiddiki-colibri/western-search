@@ -39,7 +39,7 @@ against the same real WordPress instance** as above: a real search for
 "cardiac"/FL fires `ws-search:results` with the real matched `productId`
 in `productCodes`; clicking that result navigates the browser to the exact
 real PDP URL; clicking "Search" with nothing selected navigates to
-`test.westernschools.com/nursing/view-all/` with `searchPhrase`/`state` in
+`dev.westernschools.com/nursing/view-all/` with `searchPhrase`/`state` in
 the query string and no product codes; and the `ws_search_log_term` POST
 this triggers actually lands a row in `wp_ws_search_log` (checked by
 querying the SQLite file directly) with the correct `query`/`state_abbv`/
@@ -274,7 +274,7 @@ fast keyword/typo matching only with no extra download for visitors.
 - Only the `nursing` profession's course-URL slug is confirmed against a
   real page (in `assets/search-widget.js`). The other two are a
   best-guess slugification.
-- The plugin currently points at `test-api-ms.westernschools.com` via
+- The plugin currently points at `dev-api-ms.westernschools.com` via
   `WS_MARKETING_API_BASE` — swap to the production Marketing API host
   before this goes live anywhere real.
 - The self-hosted model/WASM assets (~60MB across `assets/vendor/` and

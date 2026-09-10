@@ -322,6 +322,16 @@ const WS_TRIGRAM_BATCH_SIZE     = 50; // products per cron tick — pure local c
 const WS_TRIGRAM_NEIGHBOR_LIMIT = 5;  // top-K nearest neighbor products considered per product.
 const WS_TRIGRAM_MAX_TAGS       = 5;  // tag values considered per product, to bound row growth.
 const WS_TRIGRAM_RELATED_LIMIT  = 10; // related terms fetched per query-time lookup.
+// A name/tag value shared across too much of the catalog carries no
+// distinguishing signal — a format label like "Podcast" or a broad program
+// label like "Professional Development" turns up on such a large fraction
+// of products that using it as a related term floods an unrelated query
+// with unrelated results (measured directly against an unfiltered index:
+// a 3-letter query matched 373/374 courses in one state purely because two
+// otherwise-unrelated products happened to share a common tag). Threshold
+// is a share of the catalog, not an absolute count, so it stays meaningful
+// for a subsidiary with a very different catalog size than this one's.
+const WS_TRIGRAM_MAX_TERM_SHARE = 0.05;
 
 // Fires every WS_INDEX_TTL. Full rebuild each sweep, not incremental — this
 // table is a pure derived index, so starting clean is the simplest way to
@@ -369,6 +379,41 @@ function ws_trigram_terms_for_product( $name, $tags_raw ) {
 		$terms[]      = $candidate;
 	}
 	return $terms;
+}
+
+// How many distinct products carry each candidate term (lowercased), across
+// the whole catalog being rebuilt — not just the current batch, since a
+// term's genericness is a property of the catalog as a whole. Cheap enough
+// to recompute every batch call: this is one pass over $meta, the same size
+// input the neighbor-scoring loop below already reprocesses in full anyway.
+function ws_trigram_build_document_frequency( $meta ) {
+	$doc_frequency = array();
+	foreach ( $meta as $row ) {
+		$terms = ws_trigram_terms_for_product( $row['name'], $row['tags_raw'] );
+		foreach ( array_unique( array_map( 'strtolower', $terms ) ) as $key ) {
+			$doc_frequency[ $key ] = ( isset( $doc_frequency[ $key ] ) ? $doc_frequency[ $key ] : 0 ) + 1;
+		}
+	}
+	return $doc_frequency;
+}
+
+// Drops any candidate term used by more than WS_TRIGRAM_MAX_TERM_SHARE of
+// the catalog — applied to a product's own terms and to each neighbor's
+// terms alike, since a generic term shouldn't generate expansions from its
+// own prefix any more than it should be suggested as an expansion target.
+function ws_trigram_filter_generic_terms( $terms, $doc_frequency, $total_products ) {
+	if ( 0 === $total_products ) {
+		return $terms;
+	}
+	return array_values(
+		array_filter(
+			$terms,
+			function ( $term ) use ( $doc_frequency, $total_products ) {
+				$count = isset( $doc_frequency[ strtolower( $term ) ] ) ? $doc_frequency[ strtolower( $term ) ] : 0;
+				return ( $count / $total_products ) <= WS_TRIGRAM_MAX_TERM_SHARE;
+			}
+		)
+	);
 }
 
 // Keeps the strongest weight seen so far for a given (trigram, related_term)
@@ -445,6 +490,9 @@ function ws_search_run_trigram_rebuild_batch() {
 		$meta[ $row['product_id'] ] = $row;
 	}
 
+	$doc_frequency  = ws_trigram_build_document_frequency( $meta );
+	$total_products = count( $meta );
+
 	$cursor   = (int) get_option( 'ws_trigram_rebuild_cursor', 0 );
 	$progress = (int) get_option( 'ws_trigram_rebuild_progress', 0 );
 	set_time_limit( 55 );
@@ -456,7 +504,11 @@ function ws_search_run_trigram_rebuild_batch() {
 		if ( ! isset( $meta[ $product_id ] ) ) {
 			continue;
 		}
-		$terms = ws_trigram_terms_for_product( $meta[ $product_id ]['name'], $meta[ $product_id ]['tags_raw'] );
+		$terms = ws_trigram_filter_generic_terms(
+			ws_trigram_terms_for_product( $meta[ $product_id ]['name'], $meta[ $product_id ]['tags_raw'] ),
+			$doc_frequency,
+			$total_products
+		);
 		if ( empty( $terms ) ) {
 			continue;
 		}
@@ -483,7 +535,11 @@ function ws_search_run_trigram_rebuild_batch() {
 		$neighbors = array_slice( $scored, 0, WS_TRIGRAM_NEIGHBOR_LIMIT );
 
 		foreach ( $neighbors as $neighbor ) {
-			$neighbor_terms = ws_trigram_terms_for_product( $meta[ $neighbor['id'] ]['name'], $meta[ $neighbor['id'] ]['tags_raw'] );
+			$neighbor_terms = ws_trigram_filter_generic_terms(
+				ws_trigram_terms_for_product( $meta[ $neighbor['id'] ]['name'], $meta[ $neighbor['id'] ]['tags_raw'] ),
+				$doc_frequency,
+				$total_products
+			);
 			foreach ( $terms as $t ) {
 				foreach ( $neighbor_terms as $n ) {
 					if ( strtolower( $t ) === strtolower( $n ) ) {

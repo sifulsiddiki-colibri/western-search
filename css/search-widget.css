@@ -190,10 +190,9 @@
 }
 
 /* Normal document flow, not an absolute overlay — this widget only ever
-   renders inside the header's always-visible search band
-   (.ws-search-panel in site-header.css) here, so the dropdown should
-   grow that band rather than float outside it as a second, separate
-   box. */
+   renders inside the header's popup card (.ws-search-panel in
+   site-header.css) here, so the dropdown should grow that one card
+   rather than float outside it as a second, separate box. */
 .ws-search__dropdown {
   margin-top: 20px;
 }

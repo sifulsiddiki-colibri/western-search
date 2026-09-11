@@ -8,8 +8,9 @@
   heading ink #4F4F4F. The two-row header (thin Call Us/FAQs utility row
   above the logo/nav/cart row) matches the real site's own structure. The
   course search itself is this demo's own addition — the real site has
-  no equivalent — and renders as an always-visible bar below the header
-  (matching the Search Concierge v2 design), not a click-to-open popup.
+  no equivalent. Clicking the search icon reveals it in normal document
+  flow (matching the Search Concierge v2 design's bar/results styling),
+  not as a dimmed/floating modal popup.
 */
 
 .ws-demo-tag {
@@ -37,18 +38,22 @@
   gap: 18px;
 }
 
-/* Always-visible band that hosts the search widget in normal document
-   flow, as a sibling of the header and the hero section — never hidden
-   and never absolutely/fixed positioned, so it just takes up its own
-   row instead of behaving like a popup or dropdown card. The bar/
-   results inside it are the widget's own default styling from
-   search-widget.css, unmodified; this file only supplies light padding
-   around it. Lives here (shared by index.html and view-all.html) rather
-   than in home.css, since it's part of the header area, not
-   homepage-specific. */
+/* Search panel — hidden until the header search icon is clicked. Lives
+   in normal document flow as a sibling of the header and the hero
+   section (not absolutely/fixed positioned, and no dimmed backdrop), so
+   opening it pushes the hero down and makes room instead of floating
+   over a darkened page — the page stays fully bright. The bar/results
+   inside it are the widget's own default styling from search-widget.css,
+   unmodified; this file only supplies the panel chrome around it. Lives
+   here (shared by index.html and view-all.html) rather than in home.css,
+   since it's the header's search trigger, not homepage-specific. */
 .ws-search-panel {
   background: #fff;
   border-bottom: 1px solid #eceef1;
+}
+
+.ws-search-panel[hidden] {
+  display: none;
 }
 
 .ws-search-panel__inner {

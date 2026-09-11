@@ -30,7 +30,14 @@
           <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         </nav>
         <div class="ws-topbar__right">
-          <button class="ws-search-shortcut" id="ws-search-shortcut" aria-label="Jump to search" type="button">
+          <button
+            class="ws-search-shortcut"
+            id="ws-search-shortcut"
+            aria-label="Search courses"
+            aria-expanded="false"
+            aria-controls="ws-search-panel"
+            type="button"
+          >
             <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           </button>
           <button class="ws-cart" aria-label="Cart" type="button">
@@ -41,9 +48,10 @@
       </div>
     </header>
 
-    <!-- Always visible, in normal document flow — not a click-to-open
-         popup. -->
-    <div class="ws-search-panel" id="ws-search-panel">
+    <!-- Hidden until the search icon is clicked, then shown in normal
+         document flow (not a floating/dimmed popup) — opening it pushes
+         the hero down and makes room instead of overlaying the page. -->
+    <div class="ws-search-panel" id="ws-search-panel" hidden>
       <div class="ws-search-panel__inner">
         <div id="ws-course-search"></div>
       </div>
@@ -156,22 +164,46 @@
         );
       }
 
-      // Always visible on load — no toggle button, no hidden/shown
-      // state.
       const search = WSCourseSearch.init("#ws-course-search", {
         viewAllPageUrl: "view-all.html",
       });
-      search.sizeStateSelect();
 
-      // The header icon no longer opens/closes anything (the bar is
-      // always visible) — it just jumps down to it and focuses the
-      // input, as a familiar shortcut for anyone used to clicking a
-      // search icon.
-      document.getElementById("ws-search-shortcut").addEventListener("click", () => {
-        const panel = document.getElementById("ws-search-panel");
-        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const toggleBtn = document.getElementById("ws-search-shortcut");
+      const panel = document.getElementById("ws-search-panel");
+
+      function openPanel() {
+        panel.hidden = false;
+        toggleBtn.classList.add("is-active");
+        toggleBtn.setAttribute("aria-expanded", "true");
+        search.sizeStateSelect();
         const input = panel.querySelector(".ws-search__input");
         if (input) input.focus();
+      }
+
+      function closePanel() {
+        panel.hidden = true;
+        toggleBtn.classList.remove("is-active");
+        toggleBtn.setAttribute("aria-expanded", "false");
+      }
+
+      toggleBtn.addEventListener("click", () => {
+        if (panel.hidden) openPanel();
+        else closePanel();
+      });
+
+      // In normal document flow, not a dimmed/floating modal — still
+      // closes on an outside click or Escape, like any other disclosure.
+      document.addEventListener("click", (e) => {
+        if (
+          !panel.hidden &&
+          !e.target.closest("#ws-search-shortcut") &&
+          !e.target.closest(".ws-search-panel")
+        ) {
+          closePanel();
+        }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !panel.hidden) closePanel();
       });
     </script>
   </body>

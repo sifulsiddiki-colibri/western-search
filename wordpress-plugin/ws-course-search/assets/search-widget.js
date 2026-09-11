@@ -676,10 +676,12 @@
         if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
           e.preventDefault();
           this.saveRecent(this.input.value.trim());
-          window.location.href = this.buildProductUrl(
+          const url = this.buildProductUrl(
             this.lastResults[this.activeIndex],
             this.context.stateAbbv
           );
+          window.open(url, "_blank", "noopener");
+          this.markResultOpening(items[this.activeIndex]);
         } else if (this.goToViewAll(this.input.value.trim())) {
           e.preventDefault();
         } else {
@@ -823,7 +825,7 @@
 
           return `
             <li class="ws-search__result" data-index="${i}">
-              <a href="${escapeHtml(url)}">
+              <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
                 ${
                   badge.label
                     ? `<span class="ws-search__badge${
@@ -872,11 +874,32 @@
         });
       }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
-        a.addEventListener("click", () => this.saveRecent(query));
+        a.addEventListener("click", () => {
+          this.saveRecent(query);
+          // Opens in a new tab (see the target="_blank" above) since the
+          // real course page can take 10+ seconds to respond — this stays
+          // visible in the tab someone's actually looking at instead of
+          // that tab going blank/unresponsive-looking for that whole wait.
+          this.markResultOpening(a.closest(".ws-search__result"));
+        });
       });
 
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
+    }
+
+    // Appends a plain "Opening…" note to a result's meta line after it's
+    // clicked (or chosen via Enter) — the new tab it opens in can take
+    // 10+ seconds to respond (a real, external course-page delay, not
+    // this search), so this is just an acknowledgment that the click
+    // registered, not an indication of anything this widget is doing.
+    markResultOpening(li) {
+      if (!li) return;
+      const meta = li.querySelector(".ws-search__result-meta");
+      if (meta && !meta.dataset.opening) {
+        meta.dataset.opening = "1";
+        meta.textContent += " · Opening…";
+      }
     }
 
     // Lets anything embedding the widget (analytics, other WP blocks on the

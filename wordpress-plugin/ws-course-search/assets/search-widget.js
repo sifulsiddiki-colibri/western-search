@@ -52,7 +52,6 @@
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
   const STATE_SUGGESTION_LIMIT = 8;
-  const STORAGE_KEY = "wsSearchContext";
   const RECENT_KEY = "wsSearchRecent";
   const MAX_RECENT = 5;
 
@@ -176,9 +175,8 @@
       this.professionSlug = this.options.defaultProfession || "nursing";
       this.states = []; // populated by loadLookups(); read by the state type-ahead before then is just empty.
       // Namespaced by container id so two instances on the same page never
-      // share "recent searches" or a remembered state — each is its own
-      // independent widget, per the multi-instance requirement.
-      this.storageKey = `${STORAGE_KEY}:${this.root.id}`;
+      // share "recent searches" — each is its own independent widget, per
+      // the multi-instance requirement.
       this.recentKey = `${RECENT_KEY}:${this.root.id}`;
 
       this.context = this.loadContext();
@@ -190,10 +188,10 @@
 
       // Every ws-course-search block on the same page mirrors the same
       // state and search query — deliberate, not the older per-instance
-      // independence this widget used to guarantee (see the storageKey/
-      // recentKey comment above, which still keeps each instance's own
-      // *saved* recent-searches/localStorage separate; this is just live
-      // in-memory mirroring for as long as the page stays open).
+      // independence this widget used to guarantee (see the recentKey
+      // comment above, which still keeps each instance's own *saved*
+      // recent-searches separate; this is just live in-memory mirroring
+      // for as long as the page stays open).
       this._applyingRemoteSync = false;
       this._handleRemoteSync = (e) => this.handleRemoteSync(e);
       document.addEventListener("ws-search:sync", this._handleRemoteSync);
@@ -222,7 +220,6 @@
         if ("stateAbbv" in e.detail) {
           this.context.stateAbbv = e.detail.stateAbbv;
           this.stateInput.value = e.detail.stateFullName || "";
-          this.saveContext();
           this.closeStateSuggestions();
           if (e.detail.stateAbbv) this.warmState(e.detail.stateAbbv);
         }
@@ -271,21 +268,13 @@
       }
     }
 
-    // Starts on the "Select your state" placeholder (per the Search v2
-    // design) unless a state was already chosen in a prior visit
-    // (localStorage) or the embedder explicitly passed a defaultState
-    // option — no hardcoded fallback state.
+    // Always starts on the "Select your state" placeholder (per the
+    // Search v2 design and an explicit, repeated product requirement) —
+    // never restored from a prior visit, only from the embedder
+    // explicitly passing a defaultState option (e.g. a state-specific
+    // listings page). No hardcoded fallback state either way.
     loadContext() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(this.storageKey) || "{}");
-        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
-      } catch (e) {
-        return { stateAbbv: this.options.defaultState || "" };
-      }
-    }
-
-    saveContext() {
-      localStorage.setItem(this.storageKey, JSON.stringify(this.context));
+      return { stateAbbv: this.options.defaultState || "" };
     }
 
     loadRecent() {
@@ -445,7 +434,6 @@
     selectState(state) {
       this.context.stateAbbv = state.stateAbbv;
       this.stateInput.value = state.stateFullName;
-      this.saveContext();
       this.closeStateSuggestions();
       this.warmState(state.stateAbbv);
       // A state that hasn't been searched in a while pays a real,

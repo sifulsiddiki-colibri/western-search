@@ -367,7 +367,7 @@
                 />
                 <button type="button" class="ws-search__clear" hidden>Clear</button>
               </div>
-              <button type="button" class="ws-search__submit">${SEARCH_ICON}<span>Search</span></button>
+              <button type="button" class="ws-search__submit">Search</button>
             </div>
 
             <div class="ws-search__dropdown">

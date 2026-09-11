@@ -1,7 +1,8 @@
 /*
-  Palette sampled directly from the reference screenshots:
-  brand blue #2B57B0, accent blue #2559B7 (search bar v2 pill only —
-  button/pin/focus rings), light-blue pill #DFE6F3, heading ink #212121,
+  Colors unified with the real site's brand blue (#1758B6 — see
+  site-header.css) and the Search Concierge v2 mockup, replacing this
+  file's earlier one-off #2559B7/#2B57B0 sampled from a different
+  reference screenshot. Light-blue pill #DFE6F3, heading ink #212121,
   mandatory badge #FAECE1 / #B4794F, elective badge #F2F3F4 / #6B7280.
 */
 
@@ -29,10 +30,11 @@
   gap: 0;
   align-items: stretch;
   flex-wrap: nowrap;
-  border-radius: 8px;
+  border: 1px solid #1758b6;
+  border-radius: 10px;
   overflow: hidden;
   background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 10px 22px rgba(20, 30, 60, 0.07);
 }
 
 .ws-search__select-measure {
@@ -62,7 +64,7 @@
   left: 20px;
   width: 18px;
   height: 18px;
-  color: #2559b7;
+  color: #1758b6;
   display: flex;
   pointer-events: none;
 }
@@ -91,7 +93,7 @@
 
 .ws-search__state:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(37, 89, 183, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(23, 88, 182, 0.25);
 }
 
 .ws-search__input-wrap {
@@ -133,7 +135,7 @@
 
 .ws-search__input:focus {
   outline: none;
-  box-shadow: inset 0 0 0 2px rgba(37, 89, 183, 0.25);
+  box-shadow: inset 0 0 0 2px rgba(23, 88, 182, 0.25);
 }
 
 .ws-search__clear {
@@ -164,7 +166,7 @@
   padding: 16px 40px;
   border: none;
   border-radius: 0;
-  background: #2559b7;
+  background: #1758b6;
   color: #fff;
   font-size: 15px;
   font-weight: 700;
@@ -180,7 +182,7 @@
 }
 
 .ws-search__submit:hover {
-  background: #1e4792;
+  background: #124a99;
 }
 
 .is-loading .ws-search__submit {
@@ -188,9 +190,10 @@
 }
 
 /* Normal document flow, not an absolute overlay — this widget only ever
-   renders inside the header's popup card (.ws-search-panel in
-   site-header.css) here, so the dropdown should grow that one card
-   rather than float outside it as a second, separate box. */
+   renders inside the header's always-visible search band
+   (.ws-search-panel in site-header.css) here, so the dropdown should
+   grow that band rather than float outside it as a second, separate
+   box. */
 .ws-search__dropdown {
   margin-top: 20px;
 }
@@ -251,13 +254,13 @@
 }
 
 .ws-search__pill:hover {
-  border-color: #2b57b0;
+  border-color: #1758b6;
 }
 
 /* No border/shadow/background of its own — this list lives inside the
-   single outer popup card now, so it reads as content within that one
-   panel rather than a second nested card. The top border stands in as
-   a divider from the controls row above. */
+   single search bar's own card (.ws-search__controls) now, so it reads
+   as content within that one panel rather than a second nested card.
+   The top border stands in as a divider from the controls row above. */
 .ws-search__results {
   margin: 20px 0 0;
   padding: 0;
@@ -360,7 +363,7 @@
   padding: 14px 18px;
   border: none;
   background: none;
-  color: #2b57b0;
+  color: #1758b6;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;

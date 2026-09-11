@@ -11,35 +11,14 @@
   <body>
     <div class="ws-demo-tag">
       Recreation of westernschools.com's real header/hero/discovery UI, for
-      demo purposes — the magnifying glass (not on the real site) opens
-      the real typo-tolerant + semantic search inline; Search/Enter/
-      "see all" redirect to the recreated view-all.html.
+      demo purposes — the always-visible search bar below the header (not
+      on the real site) runs the real typo-tolerant + semantic search
+      inline; Search/Enter/"see all" redirect to the recreated
+      view-all.html.
     </div>
 
     <header class="ws-site-header">
       <div class="ws-topbar-utility">
-        <div class="ws-search-anchor">
-          <button
-            type="button"
-            class="ws-search-toggle"
-            id="ws-search-toggle"
-            aria-label="Search courses"
-            aria-expanded="false"
-            aria-controls="ws-search-panel"
-          >
-            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </button>
-          <div class="ws-search-panel" id="ws-search-panel" hidden>
-            <div class="ws-search-panel__inner">
-              <div id="ws-course-search"></div>
-            </div>
-          </div>
-        </div>
-        <!-- Outside .ws-search-anchor on purpose — index.html's outside-
-             click-closes check treats anything inside .ws-search-anchor
-             as "inside" the popup, and the backdrop itself needs to
-             count as "outside" so clicking it closes the popup. -->
-        <div class="ws-search-backdrop" id="ws-search-backdrop" hidden></div>
         <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
         <a class="ws-faq" href="#">FAQs</a>
       </div>
@@ -53,6 +32,9 @@
           <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         </nav>
         <div class="ws-topbar__right">
+          <button class="ws-search-shortcut" id="ws-search-shortcut" aria-label="Jump to search" type="button">
+            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
           <button class="ws-cart" aria-label="Cart" type="button">
             <svg viewBox="0 0 22 20" fill="none"><path d="M1 1h2.5L6 13.5h11L19.5 4H5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="18" r="1.4" fill="currentColor"/><circle cx="16" cy="18" r="1.4" fill="currentColor"/></svg>
           </button>
@@ -60,6 +42,14 @@
         </div>
       </div>
     </header>
+
+    <!-- Always visible, in normal document flow — not a click-to-open
+         popup. -->
+    <div class="ws-search-panel" id="ws-search-panel">
+      <div class="ws-search-panel__inner">
+        <div id="ws-course-search"></div>
+      </div>
+    </div>
 
     <section class="ws-home-hero">
       <div class="ws-home-hero__photo" style="background-image: url('images/hero-nurse.jpg')"></div>
@@ -105,54 +95,24 @@
 
     <script src="js/search-widget.js"></script>
     <script>
-      // Mounted immediately on load (not on first click) so the state/
-      // license-type lookups — and, once a state is known, that state's
-      // catalog — are already warm by the time someone opens the search
-      // panel. The panel container itself just toggles `hidden`; the
-      // widget underneath keeps working (and prefetching) the whole time.
+      // Always visible on load — no toggle button, no hidden/shown
+      // state. The widget itself already renders as an always-visible
+      // hero search box (see the header comment in search-widget.js);
+      // it just used to be wrapped in a hide/reveal popup here.
       const search = WSCourseSearch.init("#ws-course-search", {
         viewAllPageUrl: "view-all.html",
       });
+      search.sizeStateSelect();
 
-      const toggleBtn = document.getElementById("ws-search-toggle");
-      const panel = document.getElementById("ws-search-panel");
-      const backdrop = document.getElementById("ws-search-backdrop");
-
-      function openPanel() {
-        panel.hidden = false;
-        backdrop.hidden = false;
-        toggleBtn.classList.add("is-active");
-        toggleBtn.setAttribute("aria-expanded", "true");
-        // The state <select>'s width is measured via offsetWidth, which
-        // reads 0 while the panel is `hidden` (display:none) — recompute
-        // now that it's actually visible, or it's stuck at a too-narrow
-        // chrome-only width from the initial (hidden) render.
-        search.sizeStateSelect();
+      // The header icon no longer opens/closes anything (the bar is
+      // always visible) — it just jumps down to it and focuses the
+      // input, as a familiar shortcut for anyone used to clicking a
+      // search icon.
+      document.getElementById("ws-search-shortcut").addEventListener("click", () => {
+        const panel = document.getElementById("ws-search-panel");
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
         const input = panel.querySelector(".ws-search__input");
         if (input) input.focus();
-      }
-
-      function closePanel() {
-        panel.hidden = true;
-        backdrop.hidden = true;
-        toggleBtn.classList.remove("is-active");
-        toggleBtn.setAttribute("aria-expanded", "false");
-      }
-
-      toggleBtn.addEventListener("click", () => {
-        if (panel.hidden) openPanel();
-        else closePanel();
-      });
-
-      // A popup, not an inline flyout — close it on a backdrop click or
-      // Escape, like any other modal.
-      document.addEventListener("click", (e) => {
-        if (!panel.hidden && !e.target.closest(".ws-search-anchor")) {
-          closePanel();
-        }
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !panel.hidden) closePanel();
       });
     </script>
   </body>

@@ -6,9 +6,10 @@
   directly from a live screenshot of westernschools.com (2026-08-28):
   brand blue #1758B6 (nav links, Sign In border, Continue buttons),
   heading ink #4F4F4F. The two-row header (thin Call Us/FAQs utility row
-  above the logo/nav/cart row) matches the real site's own structure; the
-  search icon in that utility row is this demo's own addition — the real
-  site has no such icon.
+  above the logo/nav/cart row) matches the real site's own structure. The
+  course search itself is this demo's own addition — the real site has
+  no equivalent — and renders as an always-visible bar below the header
+  (matching the Search Concierge v2 design), not a click-to-open popup.
 */
 
 .ws-demo-tag {
@@ -25,10 +26,7 @@
 
 /* Thin utility row above the main row — matches the real site's own
    two-row header (Call Us/FAQs sit above the logo/nav/cart row there,
-   not inline with it). The search icon is this demo's own addition, put
-   at the left edge of this row (left of Call Us/FAQs) rather than down
-   by the cart, per the design direction to keep it grouped with this
-   row instead. */
+   not inline with it). */
 .ws-topbar-utility {
   max-width: 1400px;
   margin: 0 auto;
@@ -39,64 +37,24 @@
   gap: 18px;
 }
 
-/* Just a plain wrapper now — the search popup below is position:fixed
-   and centered on the viewport, not laid out inline here. It stays
-   nested in this DOM anchor only so the outside-click-closes check in
-   index.html's/view-all.html's script (e.target.closest(".ws-search-
-   anchor")) can tell a click inside the popup from a click outside it. */
-.ws-search-anchor {
-  display: flex;
-  align-items: center;
-}
-
-/* Search popup — hidden until the header magnifying glass is toggled.
-   A centered modal showing the full-size search bar (matching the
-   "search bar v2" mockup's own proportions/labeling), over a dimmed
-   backdrop — not an inline flyout. The bar/results inside it are the
-   widget's own default styling from search-widget.css, unmodified;
-   this file only supplies the popup chrome around it. Lives here
-   (shared by index.html and view-all.html) rather than in home.css,
-   since it's the header's search trigger, not homepage-specific. */
-.ws-search-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  z-index: 90;
-}
-
-.ws-search-backdrop[hidden] {
-  display: none;
-}
-
+/* Always-visible band that hosts the search widget in normal document
+   flow, as a sibling of the header and the hero section — never hidden
+   and never absolutely/fixed positioned, so it just takes up its own
+   row instead of behaving like a popup or dropdown card. The bar/
+   results inside it are the widget's own default styling from
+   search-widget.css, unmodified; this file only supplies light padding
+   around it. Lives here (shared by index.html and view-all.html) rather
+   than in home.css, since it's part of the header area, not
+   homepage-specific. */
 .ws-search-panel {
-  position: fixed;
-  top: 110px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(760px, calc(100vw - 48px));
-  max-height: calc(100vh - 160px);
-  /* One card encompassing everything — the bar, clear/recent-searches,
-     and results all live in normal document flow now (see
-     .ws-search__dropdown / .ws-search__results in search-widget.css),
-     so this box naturally grows to fit them instead of them floating
-     outside it as separate cards. overflow-y:auto is just a safety net
-     for a very short viewport; the results list has its own internal
-     max-height + scroll for a long result set. */
-  overflow-y: auto;
-  overflow-x: visible;
   background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.3);
-  padding: 24px;
-  z-index: 100;
-}
-
-.ws-search-panel[hidden] {
-  display: none;
+  border-bottom: 1px solid #eceef1;
 }
 
 .ws-search-panel__inner {
-  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 28px 32px;
 }
 
 .ws-topbar {
@@ -164,7 +122,7 @@
   text-decoration: none;
 }
 
-.ws-search-toggle,
+.ws-search-shortcut,
 .ws-cart {
   border: none;
   background: none;
@@ -174,7 +132,7 @@
   display: flex;
 }
 
-.ws-search-toggle svg,
+.ws-search-shortcut svg,
 .ws-cart svg {
   width: 22px;
   height: 20px;

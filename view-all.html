@@ -17,24 +17,6 @@
 
     <header class="ws-site-header">
       <div class="ws-topbar-utility">
-        <div class="ws-search-anchor">
-          <button
-            type="button"
-            class="ws-search-toggle"
-            id="ws-search-toggle"
-            aria-label="Search courses"
-            aria-expanded="false"
-            aria-controls="ws-search-panel"
-          >
-            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          </button>
-          <div class="ws-search-panel" id="ws-search-panel" hidden>
-            <div class="ws-search-panel__inner">
-              <div id="ws-course-search"></div>
-            </div>
-          </div>
-        </div>
-        <div class="ws-search-backdrop" id="ws-search-backdrop" hidden></div>
         <a class="ws-call" href="tel:8006181670">CALL US 800-618-1670</a>
         <a class="ws-faq" href="#">FAQs</a>
       </div>
@@ -48,6 +30,9 @@
           <a href="#">Other Professions <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
         </nav>
         <div class="ws-topbar__right">
+          <button class="ws-search-shortcut" id="ws-search-shortcut" aria-label="Jump to search" type="button">
+            <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
           <button class="ws-cart" aria-label="Cart" type="button">
             <svg viewBox="0 0 22 20" fill="none"><path d="M1 1h2.5L6 13.5h11L19.5 4H5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="18" r="1.4" fill="currentColor"/><circle cx="16" cy="18" r="1.4" fill="currentColor"/></svg>
           </button>
@@ -55,6 +40,14 @@
         </div>
       </div>
     </header>
+
+    <!-- Always visible, in normal document flow — not a click-to-open
+         popup. -->
+    <div class="ws-search-panel" id="ws-search-panel">
+      <div class="ws-search-panel__inner">
+        <div id="ws-course-search"></div>
+      </div>
+    </div>
 
     <section class="ws-hero">
       <div class="ws-hero__inner">
@@ -147,7 +140,7 @@
     <script src="js/search-widget.js"></script>
     <script src="js/view-all.js"></script>
     <script>
-      // Keep the header search popup's state in sync with the state this
+      // Keep the header search bar's state in sync with the state this
       // results page is already showing — the URL's ?state= is the
       // authoritative source for what this specific page is displaying,
       // and should win over whatever's stale in wsSearchContext from an
@@ -163,43 +156,22 @@
         );
       }
 
+      // Always visible on load — no toggle button, no hidden/shown
+      // state.
       const search = WSCourseSearch.init("#ws-course-search", {
         viewAllPageUrl: "view-all.html",
       });
+      search.sizeStateSelect();
 
-      const toggleBtn = document.getElementById("ws-search-toggle");
-      const panel = document.getElementById("ws-search-panel");
-      const backdrop = document.getElementById("ws-search-backdrop");
-
-      function openPanel() {
-        panel.hidden = false;
-        backdrop.hidden = false;
-        toggleBtn.classList.add("is-active");
-        toggleBtn.setAttribute("aria-expanded", "true");
-        search.sizeStateSelect();
+      // The header icon no longer opens/closes anything (the bar is
+      // always visible) — it just jumps down to it and focuses the
+      // input, as a familiar shortcut for anyone used to clicking a
+      // search icon.
+      document.getElementById("ws-search-shortcut").addEventListener("click", () => {
+        const panel = document.getElementById("ws-search-panel");
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
         const input = panel.querySelector(".ws-search__input");
         if (input) input.focus();
-      }
-
-      function closePanel() {
-        panel.hidden = true;
-        backdrop.hidden = true;
-        toggleBtn.classList.remove("is-active");
-        toggleBtn.setAttribute("aria-expanded", "false");
-      }
-
-      toggleBtn.addEventListener("click", () => {
-        if (panel.hidden) openPanel();
-        else closePanel();
-      });
-
-      document.addEventListener("click", (e) => {
-        if (!panel.hidden && !e.target.closest(".ws-search-anchor")) {
-          closePanel();
-        }
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && !panel.hidden) closePanel();
       });
     </script>
   </body>

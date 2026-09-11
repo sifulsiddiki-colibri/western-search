@@ -46,7 +46,6 @@
   const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
-  const STORAGE_KEY = "wsSearchContext";
   const RECENT_KEY = "wsSearchRecent";
   const MAX_RECENT = 5;
 
@@ -180,21 +179,13 @@
       }
     }
 
-    // Starts on the "Select your state" placeholder (per the Search v2
-    // design) unless a state was already chosen in a prior visit
-    // (localStorage) or the embedder explicitly passed a defaultState
-    // option — no hardcoded fallback state.
+    // Always starts on the "Select your state" placeholder (per the
+    // Search v2 design and an explicit, repeated product requirement) —
+    // never restored from a prior visit, only from the embedder
+    // explicitly passing a defaultState option. No hardcoded fallback
+    // state either way.
     loadContext() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        return { stateAbbv: saved.stateAbbv || this.options.defaultState || "" };
-      } catch (e) {
-        return { stateAbbv: this.options.defaultState || "" };
-      }
-    }
-
-    saveContext() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.context));
+      return { stateAbbv: this.options.defaultState || "" };
     }
 
     loadRecent() {
@@ -246,7 +237,7 @@
                 />
                 <button type="button" class="ws-search__clear" hidden>Clear</button>
               </div>
-              <button type="button" class="ws-search__submit">${SEARCH_ICON}<span>Search</span></button>
+              <button type="button" class="ws-search__submit">Search</button>
             </div>
 
             <div class="ws-search__dropdown">
@@ -275,7 +266,6 @@
 
       this.stateSelect.addEventListener("change", () => {
         this.context.stateAbbv = this.stateSelect.value;
-        this.saveContext();
         this.sizeStateSelect();
         if (this.context.stateAbbv) this.warmState(this.context.stateAbbv);
         // A state that hasn't been searched in a while pays a real,
@@ -457,10 +447,12 @@
         if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
           e.preventDefault();
           this.saveRecent(this.input.value.trim());
-          window.location.href = this.buildProductUrl(
+          const url = this.buildProductUrl(
             this.lastResults[this.activeIndex],
             this.context.stateAbbv
           );
+          window.open(url, "_blank", "noopener");
+          this.markResultOpening(items[this.activeIndex]);
         } else if (this.goToViewAll(this.input.value.trim())) {
           e.preventDefault();
         } else {
@@ -599,7 +591,7 @@
 
           return `
             <li class="ws-search__result" data-index="${i}">
-              <a href="${escapeHtml(url)}">
+              <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
                 ${
                   badge.label
                     ? `<span class="ws-search__badge${
@@ -648,11 +640,32 @@
         });
       }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
-        a.addEventListener("click", () => this.saveRecent(query));
+        a.addEventListener("click", () => {
+          this.saveRecent(query);
+          // Opens in a new tab (see the target="_blank" above) since the
+          // real course page can take 10+ seconds to respond — this stays
+          // visible in the tab someone's actually looking at instead of
+          // that tab going blank/unresponsive-looking for that whole wait.
+          this.markResultOpening(a.closest(".ws-search__result"));
+        });
       });
 
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
+    }
+
+    // Appends a plain "Opening…" note to a result's meta line after it's
+    // clicked (or chosen via Enter) — the new tab it opens in can take
+    // 10+ seconds to respond (a real, external course-page delay, not
+    // this search), so this is just an acknowledgment that the click
+    // registered, not an indication of anything this widget is doing.
+    markResultOpening(li) {
+      if (!li) return;
+      const meta = li.querySelector(".ws-search__result-meta");
+      if (meta && !meta.dataset.opening) {
+        meta.dataset.opening = "1";
+        meta.textContent += " · Opening…";
+      }
     }
 
     showMessage(message) {

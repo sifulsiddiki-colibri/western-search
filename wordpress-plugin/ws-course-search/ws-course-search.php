@@ -41,7 +41,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.0.6';
+const WS_SEARCH_VERSION = '4.0.7';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );

@@ -219,12 +219,17 @@ external CDN call) runs the same `Xenova/all-MiniLM-L6-v2` model used by
 `server.js`, just in WebAssembly instead of Node:
 
 - **Catalog-side**: Settings → WS Course Search has a "Refresh search
-  embeddings" button. Clicking it runs in the *admin's* browser: fetches
-  which products need a (re-)embedded vector
-  (`ws_search_embeddings_needed`), computes each via `embeddings.js`, and
-  POSTs results back in batches of 50 (`ws_search_save_embeddings`) so a
-  closed tab only loses unsaved progress, not the whole run. A heartbeat
-  lock keeps two admins from starting a duplicate full sweep.
+  embeddings" button. Clicking it first force-warms the whole catalog
+  (`ws_search_warm_catalog_batch`, one bounded batch per call, looped until
+  every state/license combo has been checked) so it never reports "0
+  courses" just because nobody's searched yet or WP-Cron's prewarm sweep
+  hasn't reached that combo — an already-fresh combo is a cheap no-op. It
+  then runs in the *admin's* browser: fetches which products need a
+  (re-)embedded vector (`ws_search_embeddings_needed`), computes each via
+  `embeddings.js`, and POSTs results back in batches of 50
+  (`ws_search_save_embeddings`) so a closed tab only loses unsaved progress,
+  not the whole run. A heartbeat lock keeps two admins from starting a
+  duplicate full sweep.
 - **Query-side**: the visitor's own browser computes the search query's
   embedding the same way, then sends it as a second, non-blocking request
   (`ws_search_semantic`) fired *after* keyword results already rendered —

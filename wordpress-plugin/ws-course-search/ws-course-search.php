@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.7
+ * Version:     4.0.8
  * Author:      Siful Siddiki
  */
 
@@ -41,7 +41,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.0.7';
+const WS_SEARCH_VERSION = '4.0.8';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -1631,6 +1631,52 @@ add_action( 'wp_ajax_nopriv_ws_search_log_term', 'ws_search_handle_log_term' );
 // ---------------------------------------------------------------------------
 
 const WS_EMBEDDING_LOCK_TTL = 90; // seconds — refreshed (heartbeat) by each batch save.
+
+// "Refresh search embeddings" used to just read whatever was already in
+// wp_ws_catalog, so on a fresh site (or one WP-Cron's prewarm sweep hasn't
+// reached yet) it could report 0 courses even though the Marketing API has
+// a real catalog — nothing had ever indexed it. Called by admin-embeddings.js
+// in a loop (one bounded batch per call, same WS_PREWARM_BATCH_SIZE the
+// cron prewarm sweep uses) before it checks what needs embedding, so the
+// button is self-sufficient instead of depending on prior visitor traffic.
+// Client-driven rather than the cron sweep's self-chaining
+// wp_schedule_single_event() — this is a one-off admin action, not a
+// recurring background job, and reuses the cron sweep's own cursor-free
+// ws_search_get_all_combos()/ws_ensure_indexed_pairs() building blocks
+// rather than its stateful ws_prewarm_cursor option (running both at once
+// would otherwise stomp on the same option).
+function ws_search_handle_warm_catalog_batch() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json( array( 'error' => 'forbidden' ), 403 );
+	}
+
+	$combos = ws_search_get_all_combos();
+	$total  = count( $combos );
+	$cursor = isset( $_GET['cursor'] ) ? max( 0, (int) $_GET['cursor'] ) : 0;
+
+	if ( 0 === $total || $cursor >= $total ) {
+		wp_send_json(
+			array(
+				'cursor' => $total,
+				'total'  => $total,
+				'done'   => true,
+			)
+		);
+	}
+
+	$batch_pairs = array_slice( $combos, $cursor, WS_PREWARM_BATCH_SIZE );
+	ws_ensure_indexed_pairs( $batch_pairs );
+
+	$next_cursor = $cursor + count( $batch_pairs );
+	wp_send_json(
+		array(
+			'cursor' => $next_cursor,
+			'total'  => $total,
+			'done'   => $next_cursor >= $total,
+		)
+	);
+}
+add_action( 'wp_ajax_ws_search_warm_catalog_batch', 'ws_search_handle_warm_catalog_batch' );
 
 // name + tags — must exactly match embeddings.js's embedText() so catalog
 // and query embeddings land in the same vector space.

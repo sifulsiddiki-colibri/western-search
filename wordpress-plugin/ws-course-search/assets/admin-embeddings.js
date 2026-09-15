@@ -29,12 +29,36 @@
     });
   }
 
+  // Ensures the catalog actually has data before checking what needs
+  // embedding — without this, a state/license combo nobody's ever searched
+  // (and WP-Cron's prewarm sweep hasn't reached yet) just looks like "0
+  // courses" instead of "not indexed yet". One bounded batch per call
+  // (server-side WS_PREWARM_BATCH_SIZE), looped here until done; an
+  // already-fresh combo is a cheap no-op server-side, so re-running this on
+  // every click costs little even when nothing needed warming.
+  async function warmCatalog() {
+    let cursor = 0;
+    let done = false;
+    while (!done) {
+      const res = await fetch(
+        `${config.ajaxUrl}?action=ws_search_warm_catalog_batch&cursor=${cursor}`
+      ).then((r) => r.json());
+      if (res.error || !res.total) return;
+      cursor = res.cursor;
+      done = res.done;
+      status.textContent = `Warming catalog… ${cursor}/${res.total} state/license combos checked.`;
+    }
+  }
+
   btn.addEventListener("click", async () => {
     running = true;
     btn.disabled = true;
-    status.textContent = "Checking what needs embedding…";
+    status.textContent = "Warming catalog…";
 
     try {
+      await warmCatalog();
+
+      status.textContent = "Checking what needs embedding…";
       const needRes = await fetch(
         `${config.ajaxUrl}?action=ws_search_embeddings_needed`
       ).then((r) => r.json());

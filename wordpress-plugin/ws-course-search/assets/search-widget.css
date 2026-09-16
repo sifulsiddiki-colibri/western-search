@@ -66,6 +66,7 @@
   text-align: left;
   border: none;
   background: none;
+  color: inherit;
   cursor: pointer;
 }
 
@@ -89,6 +90,7 @@
   right: 8px;
   border: none;
   background: none;
+  color: inherit;
   cursor: pointer;
 }
 
@@ -166,6 +168,7 @@
   padding: 8px;
   border: none;
   background: none;
+  color: inherit;
   cursor: pointer;
   text-align: left;
 }

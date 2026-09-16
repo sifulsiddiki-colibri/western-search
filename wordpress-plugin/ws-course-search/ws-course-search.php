@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.8
+ * Version:     4.0.9
  * Author:      Siful Siddiki
  */
 
@@ -41,7 +41,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.0.8';
+const WS_SEARCH_VERSION = '4.0.9';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -972,6 +972,16 @@ function ws_fetch_json( $url ) {
 	);
 }
 
+// Caches only a real, non-empty response. A failed/errored Marketing API
+// call (network hiccup, timeout, wrong host mid-cutover) makes
+// ws_fetch_json() return null data, which would otherwise get cached as a
+// legitimate "zero license types" answer for a full hour — and since
+// ws_search_get_all_combos() (states x license types) feeds both the
+// WP-Cron prewarm sweep and the admin "Refresh search embeddings" button's
+// force-warm step, that poisoned cache silently zeroes out the whole
+// catalog until it expires. Not caching the failure means the very next
+// call (e.g. the next batch in the same refresh) retries instead of
+// waiting out the hour.
 function ws_get_license_types() {
 	$cached = get_transient( 'ws_license_types' );
 	if ( false !== $cached ) {
@@ -979,7 +989,9 @@ function ws_get_license_types() {
 	}
 	$result        = ws_fetch_json( WS_MARKETING_API_BASE . '/marketing/licenseTypes' );
 	$license_types = $result['data'] ? $result['data'] : array();
-	set_transient( 'ws_license_types', $license_types, HOUR_IN_SECONDS );
+	if ( ! empty( $license_types ) ) {
+		set_transient( 'ws_license_types', $license_types, HOUR_IN_SECONDS );
+	}
 	return $license_types;
 }
 
@@ -990,7 +1002,9 @@ function ws_get_states() {
 	}
 	$result = ws_fetch_json( WS_MARKETING_API_BASE . '/marketing/states' );
 	$states = $result['data'] ? $result['data'] : array();
-	set_transient( 'ws_states', $states, HOUR_IN_SECONDS );
+	if ( ! empty( $states ) ) {
+		set_transient( 'ws_states', $states, HOUR_IN_SECONDS );
+	}
 	return $states;
 }
 

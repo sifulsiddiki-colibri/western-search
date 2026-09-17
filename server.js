@@ -226,6 +226,16 @@ function allowedTypos(len) {
   return 2;
 }
 
+// A short token (e.g. "car") is a substring of enough ordinary English
+// words ("care", "cardiac", "scarce"...) that scanning full description
+// text for it as a literal substring matches a huge, mostly-unrelated
+// slice of the catalog (measured directly: "car" alone matched 103/370
+// courses in one state). Title matching stays unrestricted at any length
+// — titles are short, curated course names, so "car" -> "Cardiac
+// Rehabilitation" is a real, wanted prefix match, not noise. This floor
+// only gates the far noisier full-text description scan.
+const DESCRIPTION_MATCH_MIN_LENGTH = 5;
+
 function productMatchesQuery({ titleTokens, descriptionTokens }, queryTokens) {
   return queryTokens.every((qt) => {
     const inTitle = titleTokens.some((t) => {
@@ -237,6 +247,7 @@ function productMatchesQuery({ titleTokens, descriptionTokens }, queryTokens) {
       return maxDist > 0 && levenshtein(qt, t) <= maxDist;
     });
     if (inTitle) return true;
+    if (qt.length < DESCRIPTION_MATCH_MIN_LENGTH) return false;
     return descriptionTokens.some((t) => t.includes(qt));
   });
 }

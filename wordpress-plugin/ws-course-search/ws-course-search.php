@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.0.9
+ * Version:     4.1.0
  * Author:      Siful Siddiki
  */
 
@@ -41,7 +41,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.0.9';
+const WS_SEARCH_VERSION = '4.1.0';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -958,6 +958,17 @@ function ws_allowed_typos( $len ) {
 	return 2;
 }
 
+// A short token (e.g. "car") is a substring of enough ordinary English
+// words ("care", "cardiac", "scarce"...) that scanning full description
+// text for it as a literal substring matches a huge, mostly-unrelated
+// slice of the catalog (measured directly against the Node prototype's
+// identical logic: "car" alone matched 103/370 courses in one state).
+// Title matching stays unrestricted at any length — titles are short,
+// curated course names, so "car" -> "Cardiac Rehabilitation" is a real,
+// wanted prefix match, not noise. This floor only gates the far noisier
+// full-text description scan.
+const WS_DESCRIPTION_MATCH_MIN_LENGTH = 5;
+
 // Factored out of ws_product_matches_query() so the same single-token match
 // rule (typo-tolerant title match, literal description match) can also be
 // applied to related-terms expansion candidates below.
@@ -973,6 +984,9 @@ function ws_token_matches_product( $qt, $title_tokens, $description_tokens ) {
 		if ( $max_dist > 0 && levenshtein( $qt, $t ) <= $max_dist ) {
 			return true;
 		}
+	}
+	if ( strlen( $qt ) < WS_DESCRIPTION_MATCH_MIN_LENGTH ) {
+		return false;
 	}
 	foreach ( $description_tokens as $t ) {
 		if ( false !== strpos( $t, $qt ) ) {

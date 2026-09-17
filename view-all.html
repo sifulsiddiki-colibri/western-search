@@ -144,22 +144,13 @@
     <script>
       // Keep the header search bar's state in sync with the state this
       // results page is already showing — the URL's ?state= is the
-      // authoritative source for what this specific page is displaying,
-      // and should win over whatever's stale in wsSearchContext from an
-      // earlier, unrelated visit (e.g. someone arriving via a shared
-      // link rather than through the homepage search first).
+      // authoritative source for what this specific page is displaying.
       const viewAllState = new URLSearchParams(window.location.search).get(
         "state"
       );
-      if (viewAllState) {
-        localStorage.setItem(
-          "wsSearchContext",
-          JSON.stringify({ stateAbbv: viewAllState })
-        );
-      }
 
       const search = WSCourseSearch.init("#ws-course-search", {
-        viewAllPageUrl: "view-all.html",
+        defaultState: viewAllState || "",
       });
 
       const toggleBtn = document.getElementById("ws-search-shortcut");

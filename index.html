@@ -98,9 +98,7 @@
       // Mounted immediately on load (not on first click) so the state/
       // license-type lookups are already warm by the time someone opens
       // the search panel.
-      const search = WSCourseSearch.init("#ws-course-search", {
-        viewAllPageUrl: "view-all.html",
-      });
+      const search = WSCourseSearch.init("#ws-course-search");
 
       const toggleBtn = document.getElementById("ws-search-shortcut");
       const panel = document.getElementById("ws-search-panel");

@@ -269,29 +269,6 @@
   height: 12px;
 }
 
-.ws-search__footer {
-  margin-top: 10px;
-  padding-top: 14px;
-  border-top: 1px solid #edeff3;
-}
-
-.ws-search__see-all {
-  display: inline-block;
-  padding: 4px;
-  border: none;
-  background: none;
-  color: #1758b6;
-  font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-}
-
-.ws-search__see-all:hover {
-  text-decoration: underline;
-}
-
 .ws-search__message {
   padding: 6px 4px 2px;
   font-family: "Open Sans", sans-serif;

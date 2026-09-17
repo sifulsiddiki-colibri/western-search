@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.2.1
+ * Version:     4.2.2
  * Author:      Siful Siddiki
  */
 
@@ -34,7 +34,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.2.1';
+const WS_SEARCH_VERSION = '4.2.2';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -808,10 +808,20 @@ add_action( 'admin_enqueue_scripts', 'ws_search_enqueue_admin_assets' );
 // need the handles registered, not necessarily enqueued yet. Actual
 // front-end enqueueing still happens in ws_search_enqueue_assets().
 function ws_search_register_assets() {
+	// The Search Concierge v2.1 design this widget matches uses Open Sans —
+	// registered as its own handle (a dependency of the widget's own
+	// stylesheet) rather than baked into search-widget.css, since it's a
+	// remote font file, not something this plugin ships.
+	wp_register_style(
+		'ws-course-search-font',
+		'https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap',
+		array(),
+		null
+	);
 	wp_register_style(
 		'ws-course-search',
 		plugins_url( 'assets/search-widget.css', __FILE__ ),
-		array(),
+		array( 'ws-course-search-font' ),
 		WS_SEARCH_VERSION
 	);
 	wp_register_script(

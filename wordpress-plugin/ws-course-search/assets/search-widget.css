@@ -1,15 +1,9 @@
 /*
-  Search Concierge v2.1 *behavior* — the "no search button" design: a
-  state dropdown + input (no submit button), results appear live in a
-  dropdown panel as you type, and a result row is the destination itself.
-  Ported from search_concierge_no_button.html's working demo, kept under
-  this plugin's existing ws-search__* class names rather than that file's
-  own class names, so the JS/PHP integration didn't need to change shape —
-  only what these classes render. The bar itself is intentionally left
-  without its own background/border/shadow (unlike the demo's bordered
-  "search-shell" card) so it sits flat on whatever page embeds it; only
-  the results dropdown panel gets a card treatment, since that has to
-  visually separate from the page content underneath it.
+  Search Concierge v2.1 — ported directly from search_concierge_no_button.html's
+  working demo: same colors, spacing, border/shadow treatment, and Open Sans
+  typeface, just kept under this plugin's existing ws-search__* class names
+  (rather than that file's own class names) so the JS/PHP integration didn't
+  need to change shape — only what these classes render.
 */
 
 .ws-search-hero {
@@ -17,7 +11,7 @@
   max-width: 900px;
   margin: 0 auto;
   box-sizing: border-box;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family: "Open Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
 .ws-search__panel {
@@ -28,6 +22,10 @@
   display: flex;
   align-items: stretch;
   flex-wrap: nowrap;
+  background: #ffffff;
+  border: 1px solid #1758b6;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 10px 22px rgba(20, 30, 60, 0.07);
 }
 
 /* Fixed width so picking a state never reflows the search bar — narrower
@@ -81,8 +79,8 @@
 
 .ws-search__state-chevron {
   color: #7c879a;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   flex: none;
 }
 
@@ -116,6 +114,7 @@
   background: none;
   padding: 8px 10px;
   border-radius: 6px;
+  font-family: "Open Sans", sans-serif;
   font-size: 14px;
   color: inherit;
   cursor: pointer;
@@ -149,10 +148,14 @@
   border: none;
   outline: none;
   font-size: 15.5px;
-  font-family: inherit;
+  font-family: "Open Sans", sans-serif;
   color: #1a2233;
   background: transparent;
   padding: 18px 0;
+}
+
+.ws-search__input::placeholder {
+  color: #97a1b3;
 }
 
 .ws-search__dropdown {
@@ -177,6 +180,7 @@
 }
 
 .ws-search__results-head {
+  font-family: "Open Sans", sans-serif;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -190,7 +194,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 8px;
-  margin: 0 -8px;
+  margin: 0 -4px;
   border-radius: 8px;
   text-decoration: none;
   color: inherit;
@@ -207,12 +211,13 @@
    shouldn't be one) falls back to the neutral default below. */
 .ws-search__badge {
   flex: none;
+  font-family: "Open Sans", sans-serif;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.03em;
   border-radius: 5px;
   padding: 3px 0;
-  width: 68px;
+  width: 64px;
   text-align: center;
   white-space: nowrap;
   background: #eef0f4;
@@ -240,6 +245,7 @@
 }
 
 .ws-search__result-meta {
+  font-family: "Open Sans", sans-serif;
   font-size: 12.5px;
   color: #7c879a;
 }
@@ -250,6 +256,7 @@
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  font-family: "Open Sans", sans-serif;
   font-size: 11px;
   font-weight: 600;
   color: #1758b6;
@@ -275,11 +282,11 @@
   border: none;
   background: none;
   color: #1758b6;
+  font-family: inherit;
   font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
-  font-family: inherit;
 }
 
 .ws-search__see-all:hover {
@@ -288,6 +295,7 @@
 
 .ws-search__message {
   padding: 6px 4px 2px;
+  font-family: "Open Sans", sans-serif;
   font-size: 14px;
   color: #57647a;
 }

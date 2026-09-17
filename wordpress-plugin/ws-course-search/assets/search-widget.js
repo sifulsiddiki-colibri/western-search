@@ -3,15 +3,20 @@
  * Framework-free — designed to drop into the WordPress theme via a single
  * <div id="ws-course-search"></div> + this script tag.
  *
- * Renders as an always-visible hero search box (per the Search v2 design),
- * not a click-to-open modal. No external search service — keyword/typo
- * matching runs entirely server-side (an in-process cache + Levenshtein
- * scorer). Semantic ("meaning-based") matching's *storage/comparison* also
- * runs server-side, but the embeddings themselves come from wherever the
- * backend can actually compute them: server.js computes both catalog and
- * query embeddings itself (Node, via @xenova/transformers) and returns
- * both match types in one fast call; the WordPress plugin has no Node
- * process, so its *query* embedding is computed right here in the browser
+ * Search Concierge v2.1 ("no search button") interaction: no submit button,
+ * no "view all results" page redirect — results render live in a dropdown
+ * panel as the visitor types, and clicking a result IS the destination.
+ * State is picked from a plain dropdown button + full list (not a
+ * type-ahead field), matching search_concierge_no_button.html's demo.
+ *
+ * No external search service — keyword/typo matching runs entirely
+ * server-side (an in-process cache + Levenshtein scorer). Semantic
+ * ("meaning-based") matching's *storage/comparison* also runs server-side,
+ * but the embeddings themselves come from wherever the backend can
+ * actually compute them: server.js computes both catalog and query
+ * embeddings itself (Node, via @xenova/transformers) and returns both
+ * match types in one fast call; the WordPress plugin has no Node process,
+ * so its *query* embedding is computed right here in the browser
  * (embeddings.js, same underlying model) and sent up as a second,
  * non-blocking request after keyword results already rendered — see
  * runSemanticRescue() below. Either way, semantic compute never delays the
@@ -51,13 +56,11 @@
   const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
   const TYPEAHEAD_LIMIT = 7;
   const EXPANDED_LIMIT = 50;
-  const STATE_SUGGESTION_LIMIT = 8;
 
   // Every DOM id the widget generates for itself (the results list, the
-  // state suggestion list, etc.) is derived from this root id — so it has
-  // to be unique
-  // whenever there's more than one instance on a page, even if whatever
-  // embedded the widget forgot to set one.
+  // state list, etc.) is derived from this root id — so it has to be
+  // unique whenever there's more than one instance on a page, even if
+  // whatever embedded the widget forgot to set one.
   let autoIdCounter = 0;
   function ensureUniqueId(root) {
     if (!root.id) {
@@ -106,14 +109,6 @@
       .replace(/^-+|-+$/g, "");
   }
 
-  // Only meaningful under WordPress (WP_CONFIG.viewAllBase) — the local Node
-  // prototype has no such page and keeps expanding the dropdown in place.
-  function buildViewAllUrl(baseUrl, professionSlug, query, stateAbbv) {
-    const params = new URLSearchParams({ searchPhrase: query });
-    if (stateAbbv) params.set("state", stateAbbv);
-    return `${baseUrl}/${professionSlug}/view-all/?${params.toString()}`;
-  }
-
   function defaultProductUrl(product, stateAbbv) {
     const offering = (product.offerings || [])[0];
     const licenseType = offering && offering.licenseType;
@@ -127,9 +122,12 @@
     )}`;
   }
 
+  // Credit hours + price only — delivery method is its own badge now (see
+  // deliveryBadgeClass()), so repeating it in this meta line would just be
+  // redundant with what's already shown to the left of the title.
   function formatMeta(product) {
     const offering = (product.offerings || [])[0];
-    const parts = [product.deliveryMethod];
+    const parts = [];
     if (offering && offering.creditHours != null) {
       parts.push(
         `${offering.creditHours} CE hr${offering.creditHours === 1 ? "" : "s"}`
@@ -141,17 +139,24 @@
     return parts.filter(Boolean).join(" · ");
   }
 
-  function creditBadge(product) {
-    const offering = (product.offerings || [])[0];
-    if (!offering) return { label: "", mandatory: false };
-    if (offering.isMandatory) return { label: "Mandatory", mandatory: true };
-    return { label: offering.creditType || "Elective", mandatory: false };
+  // One real badge per course: delivery method (Online/Video/Podcast/
+  // Package/Membership), matching westernschools.com's own "Delivery
+  // Methods" filter facet — not a made-up label. Credit type (Elective vs
+  // Non-Credit) was dropped in this design: the real catalog is almost
+  // entirely Elective, so it would read the same on nearly every row and
+  // tell a scanning visitor nothing; delivery method actually varies.
+  function deliveryBadgeClass(product) {
+    const method = (product.deliveryMethod || "").toLowerCase();
+    if (["video", "podcast", "online", "package", "membership"].includes(method)) {
+      return `ws-search__badge--${method}`;
+    }
+    return "";
   }
 
   const SEARCH_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9" cy="9" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M18 18L14 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
   const SPARKLE_ICON = `<svg viewBox="0 0 20 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M10 2l1.2 4.8L16 8l-4.8 1.2L10 14l-1.2-4.8L4 8l4.8-1.2L10 2z"/><path d="M16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6L16 13z"/></svg>`;
-  const PIN_ICON = `<svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 18s6-5.686 6-10a6 6 0 10-12 0c0 4.314 6 10 6 10z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="8" r="2" stroke="currentColor" stroke-width="1.4"/></svg>`;
-  const CHEVRON_ICON = `<svg viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const PIN_ICON = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="15" height="15" stroke="currentColor" stroke-width="2"><path d="M12 22s7-7.58 7-12.5A7 7 0 0 0 5 9.5C5 14.42 12 22 12 22z"/><circle cx="12" cy="9.5" r="2.5"/></svg>`;
+  const CHEVRON_ICON = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>`;
 
   class WSCourseSearch {
     constructor(root, options) {
@@ -170,8 +175,7 @@
       this.lastTotal = 0;
       this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
-      this.professionSlug = this.options.defaultProfession || "nursing";
-      this.states = []; // populated by loadLookups(); read by the state type-ahead before then is just empty.
+      this.states = []; // populated by loadLookups(); the state menu is built once that resolves.
 
       this.context = this.loadContext();
 
@@ -197,7 +201,6 @@
       const q = new URLSearchParams(window.location.search).get("q");
       if (q) {
         this.input.value = q;
-        this.clearBtn.hidden = false;
         this.runSearch();
       }
     }
@@ -212,14 +215,13 @@
     }
 
     // Analytics only — every call site is already an "explicit commit"
-    // (Enter, Search button, picking a result), never a raw keystroke, so
-    // this piggybacks on that instead of needing its own debounce.
-    // Fire-and-forget: a dropped log shouldn't ever block or visibly
-    // affect the search itself. keepalive is required, not decorative —
-    // every call site immediately triggers a same-tick navigation
-    // (goToViewAll() or a result link's default click), which would
-    // otherwise abort a normal in-flight fetch before it reaches the
-    // server.
+    // (Enter, picking a result), never a raw keystroke, so this piggybacks
+    // on that instead of needing its own debounce. Fire-and-forget: a
+    // dropped log shouldn't ever block or visibly affect the search
+    // itself. keepalive is required, not decorative — every call site
+    // immediately triggers a same-tick navigation (a result link's default
+    // click), which would otherwise abort a normal in-flight fetch before
+    // it reaches the server.
     logSearchTerm(query) {
       if (!LOG_TERM_ENDPOINT || !query) return;
       fetch(LOG_TERM_ENDPOINT, {
@@ -236,9 +238,8 @@
 
     render() {
       // Derived from the (unique) container id — otherwise every instance
-      // on the page would render the same hardcoded "ws-search-results"
-      // id, which is invalid HTML and makes aria-owns ambiguous once
-      // there's more than one.
+      // on the page would render the same hardcoded ids, which is invalid
+      // HTML and makes aria-owns ambiguous once there's more than one.
       const resultsId = `${this.root.id}-results`;
       const stateListId = `${this.root.id}-state-list`;
       // Per the "state is already established by context" decision — a
@@ -249,19 +250,20 @@
         ? ""
         : `
               <div class="ws-search__state-wrap">
-                <span class="ws-search__state-icon">${PIN_ICON}</span>
-                <input
-                  type="text"
-                  class="ws-search__state-input"
-                  placeholder="Select your state"
-                  aria-label="State"
-                  autocomplete="off"
-                  role="combobox"
+                <button
+                  type="button"
+                  class="ws-search__state-btn"
+                  aria-haspopup="listbox"
                   aria-expanded="false"
                   aria-owns="${stateListId}"
-                />
-                <span class="ws-search__state-chevron" aria-hidden="true">${CHEVRON_ICON}</span>
-                <ul class="ws-search__state-list" id="${stateListId}" hidden></ul>
+                >
+                  <span class="ws-search__state-btn-label">
+                    <span class="ws-search__state-icon">${PIN_ICON}</span>
+                    <span class="ws-search__state-btn-text">Select your state</span>
+                  </span>
+                  <span class="ws-search__state-chevron">${CHEVRON_ICON}</span>
+                </button>
+                <ul class="ws-search__state-list" id="${stateListId}" role="listbox" hidden></ul>
               </div>`;
       this.root.innerHTML = `
         <div class="ws-search-hero">
@@ -280,9 +282,7 @@
                   aria-expanded="false"
                   aria-owns="${resultsId}"
                 />
-                <button type="button" class="ws-search__clear" hidden>Clear</button>
               </div>
-              <button type="button" class="ws-search__submit">${SEARCH_ICON}<span>Search</span></button>
             </div>
 
             <div class="ws-search__dropdown">
@@ -292,161 +292,90 @@
         </div>
       `;
 
-      this.stateInput = this.root.querySelector(".ws-search__state-input");
+      this.stateBtn = this.root.querySelector(".ws-search__state-btn");
+      this.stateLabel = this.root.querySelector(".ws-search__state-btn-text");
       this.stateListEl = this.root.querySelector(".ws-search__state-list");
-      this.stateActiveIndex = -1;
-      this.stateSuggestions = [];
       this.input = this.root.querySelector(".ws-search__input");
-      this.clearBtn = this.root.querySelector(".ws-search__clear");
-      this.submitBtn = this.root.querySelector(".ws-search__submit");
       this.resultsEl = this.root.querySelector(".ws-search__results");
 
-      if (this.stateInput) this.wireStateInput();
+      if (this.stateBtn) {
+        this.stateBtn.addEventListener("click", () => this.toggleStateMenu());
+      }
 
       this.input.addEventListener("input", () => this.onInput());
       this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
-      this.clearBtn.addEventListener("click", () => {
-        this.input.value = "";
-        this.onInput();
-        this.input.focus();
-      });
-      this.submitBtn.addEventListener("click", () => {
-        if (this.goToViewAll(this.input.value.trim())) return;
-        this.runSearch(false, true);
-      });
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) {
           this.closeResults();
-          this.closeStateSuggestions();
+          this.closeStateMenu();
         }
       });
       document.addEventListener("keydown", (e) => {
         if (e.key !== "Escape") return;
         if (!this.resultsEl.hidden) this.closeResults();
-        if (this.stateListEl && !this.stateListEl.hidden) this.closeStateSuggestions();
+        if (this.stateListEl && !this.stateListEl.hidden) this.closeStateMenu();
       });
     }
 
-    // Selecting a state used to be a <select> "change" event — same
-    // downstream effect (save context, warm the state's catalog, re-run
-    // the current search), just triggered from picking a type-ahead
-    // suggestion instead. Saru: "dropdown for states is a bit old school."
-    selectState(state) {
-      this.context.stateAbbv = state.stateAbbv;
-      this.stateInput.value = state.stateFullName;
-      this.closeStateSuggestions();
-      this.warmState(state.stateAbbv);
-      // A state that hasn't been searched in a while pays a real,
-      // several-second indexing cost (see ensureIndexed on the backend)
-      // before results come back — show that a search is in flight
-      // instead of leaving the previous state's stale results sitting
-      // there looking frozen.
-      if (this.input.value.trim()) this.showLoading();
-      this.runSearch();
-    }
-
-    wireStateInput() {
-      this.stateInput.addEventListener("input", () => {
-        this.renderStateSuggestions(this.stateInput.value.trim());
-      });
-      this.stateInput.addEventListener("focus", () => {
-        this.renderStateSuggestions(this.stateInput.value.trim());
-      });
-      this.stateInput.addEventListener("blur", () => {
-        // Give a click on a suggestion a chance to register before
-        // closing/reverting — a blur fires before that click's own
-        // handler otherwise.
-        setTimeout(() => this.revertUncommittedStateText(), 150);
-      });
-      this.stateInput.addEventListener("keydown", (e) => this.onStateKeyDown(e));
-    }
-
-    // A combobox shouldn't leave the field showing text that doesn't
-    // correspond to an actual selected state — revert to whatever the
-    // last confirmed selection was (or blank) if the visitor typed
-    // something and clicked away without picking a suggestion.
-    revertUncommittedStateText() {
-      const current = this.states.find((s) => s.stateAbbv === this.context.stateAbbv);
-      this.stateInput.value = current ? current.stateFullName : "";
-      this.closeStateSuggestions();
-    }
-
-    renderStateSuggestions(query) {
-      const q = query.toLowerCase();
-      const matches = !q
-        ? this.states
-        : this.states.filter(
-            (s) =>
-              s.stateFullName.toLowerCase().includes(q) ||
-              s.stateAbbv.toLowerCase().startsWith(q)
-          );
-
-      // Browsing with no query yet: show every state (the list scrolls,
-      // see .ws-search__state-list's max-height/overflow-y in the CSS).
-      // Once the visitor types, narrow to a short list of matches.
-      this.stateSuggestions = q ? matches.slice(0, STATE_SUGGESTION_LIMIT) : matches;
-      this.stateActiveIndex = -1;
-
-      if (!this.stateSuggestions.length) {
-        this.closeStateSuggestions();
-        return;
-      }
-
-      this.stateListEl.innerHTML = this.stateSuggestions
+    // Built once real states are known (loadLookups()) — a plain
+    // click-to-open full list, not a type-ahead filter: with ~50 states
+    // total, scrolling a short list is simpler than typing to narrow it,
+    // and it can never reflow the search bar's width the way a type-ahead
+    // field's changing content could.
+    buildStateMenu() {
+      if (!this.stateListEl) return;
+      this.stateListEl.innerHTML = this.states
         .map(
-          (s, i) => `
-            <li class="ws-search__state-option" data-index="${i}">
-              <button type="button">${highlightMatch(s.stateFullName, query)}</button>
+          (s) => `
+            <li class="ws-search__state-option" role="presentation">
+              <button type="button" role="option" data-state="${escapeHtml(s.stateAbbv)}">
+                ${escapeHtml(s.stateFullName)}
+              </button>
             </li>
           `
         )
         .join("");
-      this.stateListEl.querySelectorAll(".ws-search__state-option").forEach((li, i) => {
-        li.querySelector("button").addEventListener("click", () => {
-          this.selectState(this.stateSuggestions[i]);
+      this.stateListEl.querySelectorAll(".ws-search__state-option button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const state = this.states.find((s) => s.stateAbbv === btn.getAttribute("data-state"));
+          if (state) this.selectState(state);
         });
       });
-      this.stateListEl.hidden = false;
-      this.stateInput.setAttribute("aria-expanded", "true");
+      this.updateSelectedStateOption();
     }
 
-    closeStateSuggestions() {
+    updateSelectedStateOption() {
+      if (!this.stateListEl) return;
+      this.stateListEl.querySelectorAll(".ws-search__state-option").forEach((li) => {
+        const btn = li.querySelector("button");
+        li.classList.toggle("is-selected", btn && btn.getAttribute("data-state") === this.context.stateAbbv);
+      });
+    }
+
+    toggleStateMenu() {
+      if (!this.stateListEl) return;
+      const willShow = this.stateListEl.hidden;
+      this.stateListEl.hidden = !willShow;
+      this.stateBtn.setAttribute("aria-expanded", String(willShow));
+    }
+
+    closeStateMenu() {
       if (!this.stateListEl) return;
       this.stateListEl.hidden = true;
-      this.stateListEl.innerHTML = "";
-      this.stateActiveIndex = -1;
-      this.stateInput.setAttribute("aria-expanded", "false");
+      this.stateBtn.setAttribute("aria-expanded", "false");
     }
 
-    onStateKeyDown(e) {
-      if (!this.stateSuggestions.length) return;
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        this.stateActiveIndex = Math.min(
-          this.stateActiveIndex + 1,
-          this.stateSuggestions.length - 1
-        );
-        this.updateStateActiveOption();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        this.stateActiveIndex = Math.max(this.stateActiveIndex - 1, 0);
-        this.updateStateActiveOption();
-      } else if (e.key === "Enter") {
-        if (this.stateActiveIndex >= 0 && this.stateSuggestions[this.stateActiveIndex]) {
-          e.preventDefault();
-          this.selectState(this.stateSuggestions[this.stateActiveIndex]);
-        }
-      }
-    }
-
-    updateStateActiveOption() {
-      const items = this.stateListEl.querySelectorAll(".ws-search__state-option");
-      items.forEach((item, i) =>
-        item.classList.toggle("is-active", i === this.stateActiveIndex)
-      );
-      const active = items[this.stateActiveIndex];
-      if (active) active.scrollIntoView({ block: "nearest" });
+    // Selecting a state — save context, update the button label, warm the
+    // state's catalog, and re-run the current search (same downstream
+    // effect the old type-ahead field's "change" handling had).
+    selectState(state) {
+      this.context.stateAbbv = state.stateAbbv;
+      this.stateLabel.textContent = state.stateFullName;
+      this.updateSelectedStateOption();
+      this.closeStateMenu();
+      this.warmState(state.stateAbbv);
+      if (this.input.value.trim()) this.showLoading();
+      this.runSearch();
     }
 
     async loadLookups() {
@@ -454,14 +383,14 @@
         const { states } = await fetch(LOOKUPS_ENDPOINT).then((r) => r.json());
 
         this.states = states.sort((a, b) => a.stateFullName.localeCompare(b.stateFullName));
+        this.buildStateMenu();
 
-        // Pre-fill from a prior visit (localStorage) or an explicit
-        // defaultState option, same as before — just resolving the
-        // abbreviation to a display name for the text field instead of
-        // setting a <select>'s value.
-        if (this.context.stateAbbv && this.stateInput) {
+        // Pre-fill from an explicit defaultState option, same as before —
+        // just resolving the abbreviation to a display name for the
+        // button label instead of a <select>'s value.
+        if (this.context.stateAbbv && this.stateLabel) {
           const match = this.states.find((s) => s.stateAbbv === this.context.stateAbbv);
-          this.stateInput.value = match ? match.stateFullName : this.context.stateAbbv;
+          this.stateLabel.textContent = match ? match.stateFullName : this.context.stateAbbv;
         }
       } catch (err) {
         console.error("WSCourseSearch: failed to load lookups", err);
@@ -471,13 +400,8 @@
     onInput() {
       clearTimeout(this.debounceTimer);
       const query = this.input.value.trim();
-      this.clearBtn.hidden = !query;
 
-      if (!query) {
-        this.closeResults();
-        return;
-      }
-      if (query.length < MIN_QUERY_LENGTH) {
+      if (!query || query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
         return;
       }
@@ -486,40 +410,26 @@
       this.debounceTimer = setTimeout(() => this.runSearch(), DEBOUNCE_MS);
     }
 
-    // Navigates to the "view all results" page instead of expanding the
-    // dropdown further. Under WordPress this goes to WP_CONFIG.viewAllBase
-    // (the WP_VIEW_ALL_BASE-configured page). Locally (this repo's Node
-    // prototype has no such WP config), options.viewAllPageUrl points at
-    // view-all.html instead, using a flat query string rather than the
-    // WP path shape buildViewAllUrl produces. Returns false (does nothing)
-    // if neither is configured, so callers can fall through to the
-    // existing inline-expand behavior.
-    goToViewAll(query) {
-      if (!query) return false;
-
-      if (this.options.viewAllPageUrl) {
-        this.logSearchTerm(query);
-        const params = new URLSearchParams({ searchPhrase: query });
-        if (this.context.stateAbbv) params.set("state", this.context.stateAbbv);
-        window.location.href = `${this.options.viewAllPageUrl}?${params.toString()}`;
-        return true;
-      }
-
-      if (!WP_CONFIG || !WP_CONFIG.viewAllBase) return false;
-      this.logSearchTerm(query);
-      window.location.href = buildViewAllUrl(
-        WP_CONFIG.viewAllBase,
-        this.professionSlug,
-        query,
-        this.context.stateAbbv
-      );
-      return true;
-    }
-
     onKeyDown(e) {
       const items = this.resultsEl.querySelectorAll(".ws-search__result");
+      if (e.key === "Enter") {
+        if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
+          e.preventDefault();
+          this.logSearchTerm(this.input.value.trim());
+          window.location.href = this.buildProductUrl(
+            this.lastResults[this.activeIndex],
+            this.context.stateAbbv
+          );
+        } else if (this.input.value.trim()) {
+          // No result is highlighted yet — with no separate "view all"
+          // destination in this design, Enter just does the same thing
+          // the "see all" link does: expand the results already showing.
+          e.preventDefault();
+          this.runSearch(true, true);
+        }
+        return;
+      }
       if (!items.length) return;
-
       if (e.key === "ArrowDown") {
         e.preventDefault();
         this.activeIndex = Math.min(this.activeIndex + 1, items.length - 1);
@@ -528,19 +438,6 @@
         e.preventDefault();
         this.activeIndex = Math.max(this.activeIndex - 1, 0);
         this.updateActiveItem(items);
-      } else if (e.key === "Enter") {
-        if (this.activeIndex >= 0 && this.lastResults[this.activeIndex]) {
-          e.preventDefault();
-          this.logSearchTerm(this.input.value.trim());
-          window.location.href = this.buildProductUrl(
-            this.lastResults[this.activeIndex],
-            this.context.stateAbbv
-          );
-        } else if (this.goToViewAll(this.input.value.trim())) {
-          e.preventDefault();
-        } else {
-          this.runSearch(false, true);
-        }
       }
     }
 
@@ -552,11 +449,11 @@
       if (active) active.scrollIntoView({ block: "nearest" });
     }
 
-    // `explicit` distinguishes a deliberate commit (Enter, Search button,
-    // clicking a result) from the automatic debounced search that runs
-    // while the user is still typing — only explicit commits get logged,
-    // otherwise every intermediate keystroke ("ca", "car", "card", ...)
-    // would clutter the search-term log.
+    // `explicit` distinguishes a deliberate commit (Enter, clicking a
+    // result) from the automatic debounced search that runs while the
+    // user is still typing — only explicit commits get logged, otherwise
+    // every intermediate keystroke ("ca", "car", "card", ...) would
+    // clutter the search-term log.
     async runSearch(expand, explicit) {
       const query = this.input.value.trim();
       if (query.length < MIN_QUERY_LENGTH) {
@@ -674,16 +571,16 @@
       const rows = this.lastResults
         .map((product, i) => {
           const url = this.buildProductUrl(product, this.context.stateAbbv);
-          const badge = creditBadge(product);
+          const badgeClass = deliveryBadgeClass(product);
 
           return `
             <li class="ws-search__result" data-index="${i}">
               <a href="${escapeHtml(url)}">
                 ${
-                  badge.label
-                    ? `<span class="ws-search__badge${
-                        badge.mandatory ? " is-mandatory" : ""
-                      }">${escapeHtml(badge.label)}</span>`
+                  product.deliveryMethod
+                    ? `<span class="ws-search__badge ${badgeClass}">${escapeHtml(
+                        product.deliveryMethod.toUpperCase()
+                      )}</span>`
                     : ""
                 }
                 <span class="ws-search__result-text">
@@ -710,21 +607,17 @@
         !this.expanded && this.lastTotal > this.lastResults.length
           ? `<li class="ws-search__footer">
                <button type="button" class="ws-search__see-all">
-                 ${SEARCH_ICON} See all ${this.lastTotal} results for "${escapeHtml(
-                   query
-                 )}"
+                 See all ${this.lastTotal} results for "${escapeHtml(query)}"
                </button>
              </li>`
           : "";
 
-      this.resultsEl.innerHTML = rows + footer;
+      this.resultsEl.innerHTML =
+        `<li class="ws-search__results-head">Courses</li>` + rows + footer;
 
       const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
       if (seeAllBtn) {
-        seeAllBtn.addEventListener("click", () => {
-          if (this.goToViewAll(query)) return;
-          this.runSearch(true, true);
-        });
+        seeAllBtn.addEventListener("click", () => this.runSearch(true, true));
       }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
         a.addEventListener("click", () => this.logSearchTerm(query));
@@ -763,7 +656,7 @@
     showLoading() {
       // Opens the panel the instant a valid query exists, instead of
       // leaving a dead pause while the debounce/network round trip runs.
-      this.resultsEl.innerHTML = `<li class="ws-search__message ws-search__message--loading">Searching…</li>`;
+      this.resultsEl.innerHTML = `<li class="ws-search__message">Searching…</li>`;
       this.resultsEl.hidden = false;
       this.input.setAttribute("aria-expanded", "true");
     }

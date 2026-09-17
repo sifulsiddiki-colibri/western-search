@@ -1,9 +1,11 @@
 /*
-  Intentionally unstyled beyond what the widget needs to function
-  (positioning for the dropdown/type-ahead overlays, flex layout for the
-  controls row, basic icon sizing so nothing renders oversized) — no
-  brand colors, shadows, corner radius, or typography choices. Meant to be
-  themed/restyled by whoever embeds this widget, not to ship a fixed look.
+  Search Concierge v2.1 look — the "no search button" design: a bordered
+  search shell (state dropdown + input, no submit button), results appear
+  live in a dropdown panel as you type, and a result row is the destination
+  itself. Ported from search_concierge_no_button.html's working demo, kept
+  under this plugin's existing ws-search__* class names rather than that
+  file's own class names, so the JS/PHP integration didn't need to change
+  shape — only what these classes render.
 */
 
 .ws-search-hero {
@@ -11,6 +13,7 @@
   max-width: 900px;
   margin: 0 auto;
   box-sizing: border-box;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
 .ws-search__panel {
@@ -19,45 +22,90 @@
 
 .ws-search__controls {
   display: flex;
-  gap: 8px;
   align-items: stretch;
   flex-wrap: nowrap;
+  background: #ffffff;
+  border: 1px solid #1758b6;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 10px 22px rgba(20, 30, 60, 0.07);
 }
 
+/* Fixed width so picking a state never reflows the search bar — narrower
+   than the longest label ("New Hampshire") on purpose, so it ellipsizes
+   rather than dictating the box size for every shorter state. */
 .ws-search__state-wrap {
   position: relative;
-  flex: 0 0 auto;
+  flex: none;
+  width: 166px;
   display: flex;
   align-items: center;
 }
 
-/* Decorative in the reference design (pin/magnifying-glass/chevron) —
-   omitted here rather than left unstyled, since an unstyled absolutely-
-   positioned icon would just overlap the input text. */
-.ws-search__state-icon,
-.ws-search__state-chevron,
-.ws-search__input-icon {
-  display: none;
+.ws-search__state-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 0 16px;
+  background: #f5f6f8;
+  border-radius: 9px 0 0 9px;
+  color: #16326b;
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
 }
 
-.ws-search__state-input {
-  width: 200px;
-  box-sizing: border-box;
+.ws-search__state-btn-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ws-search__state-btn-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-search__state-icon {
+  color: #1758b6;
+  flex: none;
+}
+
+.ws-search__state-chevron {
+  color: #7c879a;
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.ws-search__input-icon {
+  color: #97a1b3;
+  flex: none;
 }
 
 .ws-search__state-list {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 8px);
   left: 0;
-  right: 0;
-  z-index: 21;
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-  background: #fff;
-  border: 1px solid;
-  max-height: 280px;
+  z-index: 40;
+  min-width: 200px;
+  max-height: 300px;
   overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e2e6ec;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 16px 32px rgba(20, 30, 60, 0.14);
 }
 
 .ws-search__state-option button {
@@ -66,8 +114,21 @@
   text-align: left;
   border: none;
   background: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 14px;
   color: inherit;
   cursor: pointer;
+}
+
+.ws-search__state-option button:hover {
+  background: #eef2fd;
+  color: #1758b6;
+}
+
+.ws-search__state-option.is-selected button {
+  color: #1758b6;
+  font-weight: 700;
 }
 
 .ws-search__input-wrap {
@@ -75,111 +136,174 @@
   flex: 1 1 280px;
   display: flex;
   align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  min-width: 0;
 }
 
 .ws-search__input {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   box-sizing: border-box;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ws-search__clear {
-  position: absolute;
-  right: 8px;
   border: none;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-
-.ws-search__submit {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.ws-search__submit svg,
-.ws-search__semantic-tag svg {
-  width: 14px;
-  height: 14px;
+  outline: none;
+  font-size: 15.5px;
+  font-family: inherit;
+  color: #1a2233;
+  background: transparent;
+  padding: 18px 0;
 }
 
 .ws-search__dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 10px);
   left: 0;
   right: 0;
   z-index: 20;
 }
 
 .ws-search__results {
-  margin: 8px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 22px 24px 24px;
   list-style: none;
-  background: #fff;
-  border: 1px solid;
+  background: #ffffff;
+  border: 1px solid #e2e6ec;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 18px 40px rgba(20, 30, 60, 0.14);
   max-height: 420px;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.ws-search__results-head {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #1758b6;
+  text-transform: uppercase;
+  margin: 0 0 10px;
 }
 
 .ws-search__result a {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px;
+  padding: 8px 8px;
+  margin: 0 -8px;
+  border-radius: 8px;
   text-decoration: none;
   color: inherit;
 }
 
-.ws-search__badge {
-  flex: 0 0 auto;
+.ws-search__result a:hover,
+.ws-search__result.is-active a {
+  background: #f4f6fa;
 }
+
+/* Fixed width (not padding-only) so every badge lines up in the same
+   column regardless of label length ("PODCAST" vs "VIDEO"). Colors match
+   the real catalog's five delivery methods; an unrecognized value (there
+   shouldn't be one) falls back to the neutral default below. */
+.ws-search__badge {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-radius: 5px;
+  padding: 3px 0;
+  width: 68px;
+  text-align: center;
+  white-space: nowrap;
+  background: #eef0f4;
+  color: #4b5563;
+}
+
+.ws-search__badge--video { background: #f2d9b3; color: #6b4111; }
+.ws-search__badge--podcast { background: #e3d9f2; color: #5b3a91; }
+.ws-search__badge--online { background: #d9e6f7; color: #1758b6; }
+.ws-search__badge--package { background: #d9f2e3; color: #146b41; }
+.ws-search__badge--membership { background: #f2e6d9; color: #8a4b11; }
 
 .ws-search__result-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1;
+}
+
+.ws-search__result-name {
+  font-size: 14.5px;
+  color: #1a2233;
+  font-weight: 500;
+}
+
+.ws-search__result-meta {
+  font-size: 12.5px;
+  color: #7c879a;
 }
 
 .ws-search__semantic-tag {
-  flex: 0 0 auto;
-  margin-left: auto;
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1758b6;
+  background: #e8edfc;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.ws-search__semantic-tag svg {
+  width: 12px;
+  height: 12px;
 }
 
 .ws-search__footer {
-  border-top: 1px solid;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid #edeff3;
 }
 
 .ws-search__see-all {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px;
+  display: inline-block;
+  padding: 4px;
   border: none;
   background: none;
-  color: inherit;
+  color: #1758b6;
+  font-size: 13.5px;
+  font-weight: 600;
   cursor: pointer;
   text-align: left;
+  font-family: inherit;
+}
+
+.ws-search__see-all:hover {
+  text-decoration: underline;
 }
 
 .ws-search__message {
-  padding: 8px;
+  padding: 6px 4px 2px;
+  font-size: 14px;
+  color: #57647a;
 }
 
 @media (max-width: 640px) {
   .ws-search__controls {
     flex-direction: column;
-    align-items: stretch;
+  }
+  .ws-search__state-wrap {
+    width: 100%;
+  }
+  .ws-search__state-btn {
+    border-radius: 9px 9px 0 0;
+    padding: 14px 16px;
+  }
+  .ws-search__input-wrap {
+    border-radius: 0 0 9px 9px;
   }
 }

@@ -7,7 +7,7 @@
  *              plugin-owned tables, and semantic embeddings are computed
  *              in the browser (visitor's for queries, admin's for the
  *              catalog), not on the server.
- * Version:     4.1.0
+ * Version:     4.2.0
  * Author:      Siful Siddiki
  */
 
@@ -17,13 +17,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 if ( ! defined( 'WS_MARKETING_API_BASE' ) ) {
 	define( 'WS_MARKETING_API_BASE', 'https://dev-api-ms.westernschools.com' );
-}
-
-// The "view all results" page lives on the main site, not the Marketing API —
-// clicking Search/Enter/"see all" sends the visitor there instead of expanding
-// the dropdown further. Test host until this is confirmed on production.
-if ( ! defined( 'WS_VIEW_ALL_BASE' ) ) {
-	define( 'WS_VIEW_ALL_BASE', 'https://dev.westernschools.com' );
 }
 
 const WS_CATALOG_PAGE_SIZE = 100; // Marketing API's hard per-request cap.
@@ -41,7 +34,7 @@ const WS_MIN_QUERY_LENGTH          = 3;   // matches MIN_QUERY_LENGTH on the JS 
 // previously hand-repeated as the literal '4.0.7' at each wp_register_*/
 // wp_enqueue_script() call, which is easy to forget to bump and leaves
 // WordPress serving a stale cached JS/CSS file after an edit.
-const WS_SEARCH_VERSION = '4.1.0';
+const WS_SEARCH_VERSION = '4.2.0';
 
 function ws_semantic_enabled() {
 	return '0' !== get_option( 'ws_semantic_enabled', '1' );
@@ -851,7 +844,6 @@ function ws_search_enqueue_assets() {
 			'embeddingsModuleUrl' => plugins_url( 'assets/embeddings.js', __FILE__ ),
 			'modelsUrl'           => plugins_url( 'assets/models/', __FILE__ ),
 			'wasmUrl'             => plugins_url( 'assets/vendor/', __FILE__ ),
-			'viewAllBase'         => WS_VIEW_ALL_BASE,
 		)
 	);
 }

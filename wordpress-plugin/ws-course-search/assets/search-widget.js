@@ -54,8 +54,11 @@
   const DEBOUNCE_MS = 500;
   const MIN_QUERY_LENGTH = 3;
   const SEMANTIC_MIN_QUERY_LENGTH = 4; // matches WS_SEMANTIC_MIN_QUERY_LENGTH on the PHP side.
-  const TYPEAHEAD_LIMIT = 7;
-  const EXPANDED_LIMIT = 50;
+  // No "see all" step — every matching course is fetched and shown at once,
+  // scrollable in the results panel. Comfortably above any real state's
+  // catalog size (the largest state/profession combo is ~370-400 courses),
+  // so this is "all of them," not a second page boundary.
+  const RESULTS_LIMIT = 500;
 
   // Every DOM id the widget generates for itself (the results list, the
   // state list, etc.) is derived from this root id — so it has to be
@@ -173,7 +176,6 @@
       this.activeIndex = -1;
       this.lastResults = [];
       this.lastTotal = 0;
-      this.expanded = false;
       this.buildProductUrl = this.options.buildProductUrl || defaultProductUrl;
       this.states = []; // populated by loadLookups(); the state menu is built once that resolves.
 
@@ -421,11 +423,11 @@
             this.context.stateAbbv
           );
         } else if (this.input.value.trim()) {
-          // No result is highlighted yet — with no separate "view all"
-          // destination in this design, Enter just does the same thing
-          // the "see all" link does: expand the results already showing.
+          // No result is highlighted yet — every match is already showing
+          // (no separate "see all" step), so Enter just logs this as a
+          // deliberate commit rather than triggering another fetch.
           e.preventDefault();
-          this.runSearch(true, true);
+          this.logSearchTerm(this.input.value.trim());
         }
         return;
       }
@@ -454,7 +456,7 @@
     // user is still typing — only explicit commits get logged, otherwise
     // every intermediate keystroke ("ca", "car", "card", ...) would
     // clutter the search-term log.
-    async runSearch(expand, explicit) {
+    async runSearch(explicit) {
       const query = this.input.value.trim();
       if (query.length < MIN_QUERY_LENGTH) {
         this.closeResults();
@@ -466,8 +468,6 @@
         return;
       }
 
-      this.expanded = !!expand;
-
       if (this.abortController) this.abortController.abort();
       this.abortController = new AbortController();
 
@@ -477,7 +477,7 @@
         state: this.context.stateAbbv,
         q: query,
         offset: "0",
-        limit: String(this.expanded ? EXPANDED_LIMIT : TYPEAHEAD_LIMIT),
+        limit: String(RESULTS_LIMIT),
       });
 
       try {
@@ -535,7 +535,7 @@
           q: query,
           vector: JSON.stringify(vector),
           exclude: this.lastResults.map((p) => p.productId).join(","),
-          limit: String(this.expanded ? EXPANDED_LIMIT : TYPEAHEAD_LIMIT),
+          limit: String(RESULTS_LIMIT),
         });
 
         const res = await fetch(withParams(SEMANTIC_ENDPOINT, params), {
@@ -603,22 +603,9 @@
         })
         .join("");
 
-      const footer =
-        !this.expanded && this.lastTotal > this.lastResults.length
-          ? `<li class="ws-search__footer">
-               <button type="button" class="ws-search__see-all">
-                 See all ${this.lastTotal} results for "${escapeHtml(query)}"
-               </button>
-             </li>`
-          : "";
-
       this.resultsEl.innerHTML =
-        `<li class="ws-search__results-head">Courses</li>` + rows + footer;
+        `<li class="ws-search__results-head">Courses</li>` + rows;
 
-      const seeAllBtn = this.resultsEl.querySelector(".ws-search__see-all");
-      if (seeAllBtn) {
-        seeAllBtn.addEventListener("click", () => this.runSearch(true, true));
-      }
       this.resultsEl.querySelectorAll(".ws-search__result a").forEach((a) => {
         a.addEventListener("click", () => this.logSearchTerm(query));
       });

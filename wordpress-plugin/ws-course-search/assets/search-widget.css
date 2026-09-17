@@ -1,11 +1,15 @@
 /*
-  Search Concierge v2.1 look — the "no search button" design: a bordered
-  search shell (state dropdown + input, no submit button), results appear
-  live in a dropdown panel as you type, and a result row is the destination
-  itself. Ported from search_concierge_no_button.html's working demo, kept
-  under this plugin's existing ws-search__* class names rather than that
-  file's own class names, so the JS/PHP integration didn't need to change
-  shape — only what these classes render.
+  Search Concierge v2.1 *behavior* — the "no search button" design: a
+  state dropdown + input (no submit button), results appear live in a
+  dropdown panel as you type, and a result row is the destination itself.
+  Ported from search_concierge_no_button.html's working demo, kept under
+  this plugin's existing ws-search__* class names rather than that file's
+  own class names, so the JS/PHP integration didn't need to change shape —
+  only what these classes render. The bar itself is intentionally left
+  without its own background/border/shadow (unlike the demo's bordered
+  "search-shell" card) so it sits flat on whatever page embeds it; only
+  the results dropdown panel gets a card treatment, since that has to
+  visually separate from the page content underneath it.
 */
 
 .ws-search-hero {
@@ -24,10 +28,6 @@
   display: flex;
   align-items: stretch;
   flex-wrap: nowrap;
-  background: #ffffff;
-  border: 1px solid #1758b6;
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(20, 30, 60, 0.05), 0 10px 22px rgba(20, 30, 60, 0.07);
 }
 
 /* Fixed width so picking a state never reflows the search bar — narrower
